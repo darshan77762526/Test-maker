@@ -68,7 +68,7 @@ router.get('/:id/run', authenticate, async (req, res) => {
       return res.status(404).send('<h3>Test not found or inactive.</h3>');
     }
 
-    const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads');
+    const uploadDir = process.env.UPLOAD_DIR || (process.env.VERCEL ? '/tmp/uploads' : path.join(__dirname, '..', 'uploads'));
     const filePath = path.join(uploadDir, test.file_name);
 
     if (!fs.existsSync(filePath)) {

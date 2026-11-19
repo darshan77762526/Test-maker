@@ -11,9 +11,9 @@ const { parseCbtHtml } = require('../utils/htmlParser');
 router.use(authenticate, requireAdmin);
 
 // Multer storage configuration
-const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads');
+const uploadDir = process.env.UPLOAD_DIR || (process.env.VERCEL ? '/tmp/uploads' : path.join(__dirname, '..', 'uploads'));
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+  try { fs.mkdirSync(uploadDir, { recursive: true }); } catch (e) {}
 }
 
 const storage = multer.diskStorage({

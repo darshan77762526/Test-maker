@@ -45,7 +45,10 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(clientPath, 'index.html'));
 });
 
-// Start Server and Initialize Database
+// Export app for serverless platforms (Vercel)
+module.exports = app;
+
+// Start Server and Initialize Database (for non-serverless environments)
 async function bootstrap() {
   try {
     await initDatabase();
@@ -66,4 +69,6 @@ async function bootstrap() {
   }
 }
 
-bootstrap();
+if (require.main === module) {
+  bootstrap();
+}

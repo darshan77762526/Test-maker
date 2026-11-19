@@ -3,7 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
 
-const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const isVercel = !!process.env.VERCEL;
+const dataDir = process.env.DATA_DIR || (isVercel ? '/tmp/data' : path.join(__dirname, '..', 'data'));
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
@@ -146,9 +147,20 @@ async function initDatabase() {
 
   // Pre-seed sample test if available
   const sampleFileName = 'sample_jee_main_2026.html';
-  const samplePath = path.join(__dirname, 'uploads', sampleFileName);
-  if (fs.existsSync(samplePath)) {
-    const existingTest = await query.get('SELECT * FROM tests WHERE file_name = ?', [sampleFileName]);
+  const bundledSample = path.join(__dirname, 'uploads', sampleFileName);
+  const targetUploadDir = process.env.UPLOAD_DIR || (process.env.VERCEL ? '/tmp/uploads' : path.join(__dirname, 'uploads'));
+
+  if (!fs.existsSync(targetUploadDir)) {
+    try { fs.mkdirSync(targetUploadDir, { recursive: true }); } catch (e) {}
+  }
+
+  const targetSample = path.join(targetUploadDir, sampleFileName);
+  if (!fs.existsSync(targetSample) && fs.existsSync(bundledSample)) {
+    try { fs.copyFileSync(bundledSample, targetSample); } catch (e) {}
+  }
+
+  if (fs.existsSync(targetSample)) {
+    const existingTest = await query.get('SELECT * FROM tests WHERE test_code = ? OR file_name = ?', ['JEE2026S1', sampleFileName]);
     if (!existingTest) {
       await query.run(
         `INSERT INTO tests 
