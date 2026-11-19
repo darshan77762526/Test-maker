@@ -40,24 +40,66 @@ const upload = multer({
 
 /**
  * GET /api/admin/stats
- * Dashboard KPI numbers
+ * Dashboard KPI numbers synced with Firebase Cloud
  */
 router.get('/stats', async (req, res) => {
   try {
-    const studentsCount = await query.get("SELECT COUNT(*) AS count FROM users WHERE role = 'STUDENT'");
-    const testsCount = await query.get('SELECT COUNT(*) AS count FROM tests');
-    const submissionsCount = await query.get('SELECT COUNT(*) AS count FROM submissions');
-    const activeSessionsCount = await query.get(
-      `SELECT COUNT(*) AS count FROM sessions 
-       WHERE is_active = 1 
-         AND (strftime('%s', 'now') - strftime('%s', last_ping_at)) < 120`
-    );
+    let totalStudents = 0;
+    let totalTests = 0;
+    let totalSubmissions = 0;
+    let liveActiveSessions = 0;
+
+    // Check SQLite
+    try {
+      const studentsCount = await query.get("SELECT COUNT(*) AS count FROM users WHERE role = 'STUDENT'");
+      const testsCount = await query.get('SELECT COUNT(*) AS count FROM tests WHERE is_active = 1');
+      const submissionsCount = await query.get('SELECT COUNT(*) AS count FROM submissions');
+      const activeSessionsCount = await query.get(
+        `SELECT COUNT(*) AS count FROM sessions 
+         WHERE is_active = 1 
+           AND (strftime('%s', 'now') - strftime('%s', last_ping_at)) < 120`
+      );
+
+      totalStudents = studentsCount?.count || 0;
+      totalTests = testsCount?.count || 0;
+      totalSubmissions = submissionsCount?.count || 0;
+      liveActiveSessions = activeSessionsCount?.count || 0;
+    } catch (e) {}
+
+    // Fallback/enrich from Firebase RTDB if SQLite had cold start
+    if (firebaseStore.isAvailable()) {
+      try {
+        if (totalTests === 0) {
+          const fbTests = await firebaseStore.getTests();
+          if (fbTests) totalTests = fbTests.filter(t => t.is_active !== 0).length;
+        }
+        if (totalSubmissions === 0) {
+          const fbSubs = await firebaseStore.getSubmissions();
+          if (fbSubs) totalSubmissions = fbSubs.length;
+        }
+        if (totalStudents === 0) {
+          const fbUsersCount = await firebaseStore.getUsersCount();
+          if (fbUsersCount > 0) totalStudents = fbUsersCount;
+        }
+        const fbSessions = await firebaseStore.getSessions();
+        if (fbSessions && fbSessions.length > 0) {
+          const now = Date.now();
+          liveActiveSessions = fbSessions.filter(s => {
+            if (s.is_active !== 1) return false;
+            const lastPing = new Date(s.last_ping_at || s.login_at || 0).getTime();
+            return (now - lastPing) < 180000;
+          }).length;
+        }
+      } catch (fbErr) {
+        console.error('Firebase stats sync error:', fbErr.message);
+      }
+    }
 
     return res.json({
-      totalStudents: studentsCount?.count || 0,
-      totalTests: testsCount?.count || 0,
-      totalSubmissions: submissionsCount?.count || 0,
-      liveActiveSessions: activeSessionsCount?.count || 0
+      totalStudents,
+      totalTests,
+      totalSubmissions,
+      liveActiveSessions
     });
   } catch (error) {
     console.error('Admin stats error:', error);
@@ -90,7 +132,7 @@ router.get('/sessions', async (req, res) => {
             isActive: s.is_active === 1,
             terminatedReason: s.terminated_reason,
             liveStatus: s.is_active === 1 ? 'Active' : 'Terminated',
-            secSincePing: 10
+            secSincePing: Math.round((Date.now() - new Date(s.last_ping_at || s.login_at || 0).getTime()) / 1000)
           }))
         });
       }
@@ -161,6 +203,20 @@ router.post('/sessions/:id/terminate', async (req, res) => {
        WHERE id = ?`,
       [sessionId]
     );
+
+    if (firebaseStore.isAvailable()) {
+      try {
+        const rtdb = firebaseStore.getDb();
+        if (rtdb) {
+          await rtdb.ref(`cbt/sessions/${sessionId}`).update({
+            is_active: 0,
+            terminated_reason: 'terminated_by_admin',
+            terminated_at: new Date().toISOString()
+          });
+        }
+      } catch (e) {}
+    }
+
     return res.json({ message: 'Session forcefully terminated' });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to terminate session' });
@@ -170,6 +226,7 @@ router.post('/sessions/:id/terminate', async (req, res) => {
 /**
  * POST /api/admin/upload
  * Admin uploads CBT HTML files (Gemini-generated, minor, major, or mock papers)
+ * Persists to both SQLite and Firebase Realtime Database
  */
 router.post('/upload', upload.single('testFile'), async (req, res) => {
   try {
@@ -185,7 +242,8 @@ router.post('/upload', upload.single('testFile'), async (req, res) => {
 
     const title = req.body.title?.trim() || parsed.title;
     const durationMinutes = parseInt(req.body.durationMinutes, 10) || parsed.durationMinutes;
-    const hideResults = req.body.hideResultsStudent === '0' || req.body.hideResultsStudent === false ? 0 : 1;
+    // Default to showing detailed analysis to students (0 = visible to students)
+    const hideResults = req.body.hideResultsStudent === '1' || req.body.hideResultsStudent === true ? 1 : 0;
 
     // Generate unique test code
     let testCode = req.body.testCode?.trim();
@@ -209,10 +267,35 @@ router.post('/upload', upload.single('testFile'), async (req, res) => {
       ]
     );
 
+    const testId = result.lastID;
+
+    // Persist test metadata AND full HTML content to Firebase Realtime Database
+    if (firebaseStore.isAvailable()) {
+      try {
+        await firebaseStore.saveTest({
+          id: testId,
+          test_code: testCode,
+          title,
+          description: req.body.description?.trim() || 'Uploaded CBT Paper',
+          file_name: req.file.filename,
+          duration_minutes: durationMinutes,
+          total_questions: parsed.totalQuestions,
+          subjects: parsed.subjects,
+          hide_results_student: hideResults,
+          is_active: 1,
+          created_at: new Date().toISOString(),
+          html_content: fileContent
+        });
+        console.log(`[Firebase] Successfully backed up test ${testCode} (ID: ${testId}) to Cloud RTDB`);
+      } catch (fbErr) {
+        console.error('[Firebase] Failed to backup test to cloud:', fbErr.message);
+      }
+    }
+
     return res.status(201).json({
       message: 'Test uploaded and published successfully!',
       test: {
-        id: result.lastID,
+        id: testId,
         testCode,
         title,
         durationMinutes,
@@ -229,19 +312,77 @@ router.post('/upload', upload.single('testFile'), async (req, res) => {
 
 /**
  * GET /api/admin/tests
- * List all uploaded tests with attempt statistics
+ * List all uploaded tests with attempt statistics, merged across SQLite & Firebase
  */
 router.get('/tests', async (req, res) => {
   try {
-    const tests = await query.all(
-      `SELECT t.*, COUNT(s.id) AS total_attempts, AVG(s.total_score) AS avg_score
-       FROM tests t
-       LEFT JOIN submissions s ON s.test_id = t.id
-       GROUP BY t.id
-       ORDER BY t.id DESC`
-    );
+    let localTests = [];
+    try {
+      localTests = await query.all(
+        `SELECT t.*, COUNT(s.id) AS total_attempts, AVG(s.total_score) AS avg_score
+         FROM tests t
+         LEFT JOIN submissions s ON s.test_id = t.id
+         GROUP BY t.id
+         ORDER BY t.id DESC`
+      );
+    } catch (e) {}
 
-    const formatted = tests.map(t => {
+    // Synchronize tests from Firebase if SQLite was fresh/cold
+    if (firebaseStore.isAvailable()) {
+      try {
+        const fbTests = await firebaseStore.getTests();
+        if (fbTests && fbTests.length > 0) {
+          for (const fbt of fbTests) {
+            const exists = localTests.find(lt => String(lt.id) === String(fbt.id) || lt.test_code === fbt.test_code);
+            if (!exists && fbt.is_active !== 0) {
+              // Ensure test file exists in uploads dir
+              const fName = fbt.file_name || `test_${fbt.id}.html`;
+              const fPath = path.join(uploadDir, fName);
+              if (!fs.existsSync(fPath) && fbt.html_content) {
+                try { fs.writeFileSync(fPath, fbt.html_content, 'utf8'); } catch (e) {}
+              }
+
+              // Recover into SQLite
+              await query.run(
+                `INSERT OR REPLACE INTO tests 
+                 (id, test_code, title, description, file_name, duration_minutes, total_questions, subjects, hide_results_student, is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+                [
+                  fbt.id,
+                  fbt.test_code,
+                  fbt.title,
+                  fbt.description || '',
+                  fName,
+                  fbt.duration_minutes || 180,
+                  fbt.total_questions || 75,
+                  typeof fbt.subjects === 'string' ? fbt.subjects : JSON.stringify(fbt.subjects || []),
+                  fbt.hide_results_student ? 1 : 0
+                ]
+              ).catch(() => {});
+
+              localTests.push({
+                id: fbt.id,
+                test_code: fbt.test_code,
+                title: fbt.title,
+                description: fbt.description,
+                duration_minutes: fbt.duration_minutes || 180,
+                total_questions: fbt.total_questions || 75,
+                subjects: fbt.subjects,
+                hide_results_student: fbt.hide_results_student ? 1 : 0,
+                is_active: 1,
+                total_attempts: 0,
+                avg_score: 0,
+                created_at: fbt.created_at || new Date().toISOString()
+              });
+            }
+          }
+        }
+      } catch (fbErr) {
+        console.error('Error synchronizing tests from Firebase:', fbErr.message);
+      }
+    }
+
+    const formatted = localTests.map(t => {
       let subjects = [];
       try {
         subjects = typeof t.subjects === 'string' ? JSON.parse(t.subjects) : t.subjects;
@@ -307,6 +448,20 @@ router.patch('/tests/:id', async (req, res) => {
     params.push(testId);
     await query.run(`UPDATE tests SET ${updates.join(', ')} WHERE id = ?`, params);
 
+    if (firebaseStore.isAvailable()) {
+      try {
+        const rtdb = firebaseStore.getDb();
+        if (rtdb) {
+          const fbUpdate = {};
+          if (hideResultsStudent !== undefined) fbUpdate['hide_results_student'] = hideResultsStudent ? 1 : 0;
+          if (isActive !== undefined) fbUpdate['is_active'] = isActive ? 1 : 0;
+          if (title) fbUpdate['title'] = title.trim();
+          if (durationMinutes) fbUpdate['duration_minutes'] = parseInt(durationMinutes, 10);
+          await rtdb.ref(`cbt/tests/${testId}`).update(fbUpdate);
+        }
+      } catch (e) {}
+    }
+
     return res.json({ message: 'Test updated successfully' });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to update test' });
@@ -352,6 +507,7 @@ router.delete('/tests/:id', async (req, res) => {
 /**
  * GET /api/admin/results
  * View all candidate exam results and submissions with device info
+ * Serves as the master Admin Leaderboard
  */
 router.get('/results', async (req, res) => {
   try {
@@ -370,11 +526,11 @@ router.get('/results', async (req, res) => {
               testCode: s.test_code || 'CBT',
               totalScore: s.total_score,
               maxMarks: s.max_marks || 300,
-              correct: s.correct_count,
-              incorrect: s.incorrect_count,
-              unattempted: s.unattempted_count,
-              accuracy: s.accuracy_percent,
-              timeTakenSec: s.time_taken_sec,
+              correct: s.correct_count || 0,
+              incorrect: s.incorrect_count || 0,
+              unattempted: s.unattempted_count || 0,
+              accuracy: s.accuracy_percent || 0,
+              timeTakenSec: s.time_taken_sec || 0,
               submittedAt: s.submitted_at,
               deviceOs: device.os || 'Unknown',
               deviceBrowser: device.browser || 'Unknown',
@@ -436,19 +592,57 @@ router.get('/results', async (req, res) => {
 /**
  * GET /api/admin/results/:submissionId
  * View single submission breakdown with responses
+ * Falls back to Firebase RTDB if SQLite cold-started
  */
 router.get('/results/:submissionId', async (req, res) => {
   try {
     const subId = req.params.submissionId;
-    const sub = await query.get(
-      `SELECT s.*, u.name AS student_name, u.email AS student_email,
-              t.title AS test_title, t.test_code, t.subjects
-       FROM submissions s
-       JOIN users u ON u.id = s.user_id
-       JOIN tests t ON t.id = s.test_id
-       WHERE s.id = ?`,
-      [subId]
-    );
+    let sub = null;
+    
+    try {
+      sub = await query.get(
+        `SELECT s.*, u.name AS student_name, u.email AS student_email,
+                t.title AS test_title, t.test_code, t.subjects
+         FROM submissions s
+         JOIN users u ON u.id = s.user_id
+         JOIN tests t ON t.id = s.test_id
+         WHERE s.id = ?`,
+        [subId]
+      );
+    } catch (e) {}
+
+    // Fallback to Firebase Realtime Database
+    if (!sub && firebaseStore.isAvailable()) {
+      const fbSub = await firebaseStore.getSubmission(subId);
+      if (fbSub) {
+        let answers = {};
+        let device = {};
+        try {
+          answers = typeof fbSub.answers_json === 'string' ? JSON.parse(fbSub.answers_json) : (fbSub.answers_json || {});
+          device = typeof fbSub.device_info === 'string' ? JSON.parse(fbSub.device_info) : (fbSub.device_info || {});
+        } catch (e) {}
+
+        return res.json({
+          submission: {
+            id: fbSub.id,
+            studentName: fbSub.user_name || 'Candidate',
+            studentEmail: fbSub.user_email || 'candidate@gmail.com',
+            testTitle: fbSub.test_title || 'CBT Paper',
+            testCode: fbSub.test_code || 'CBT',
+            totalScore: fbSub.total_score,
+            maxMarks: fbSub.max_marks || 300,
+            correct: fbSub.correct_count || 0,
+            incorrect: fbSub.incorrect_count || 0,
+            unattempted: fbSub.unattempted_count || 0,
+            accuracy: fbSub.accuracy_percent || 0,
+            timeTakenSec: fbSub.time_taken_sec || 0,
+            submittedAt: fbSub.submitted_at,
+            device,
+            answers
+          }
+        });
+      }
+    }
 
     if (!sub) {
       return res.status(404).json({ error: 'Submission not found' });
@@ -491,16 +685,44 @@ router.get('/results/:submissionId', async (req, res) => {
  */
 router.get('/export/csv', async (req, res) => {
   try {
-    const results = await query.all(
-      `SELECT s.id, u.name AS student_name, u.email AS student_email,
-              t.title AS test_title, s.total_score, s.max_marks,
-              s.correct_count, s.incorrect_count, s.unattempted_count,
-              s.accuracy_percent, s.time_taken_sec, s.device_info, s.submitted_at
-       FROM submissions s
-       JOIN users u ON u.id = s.user_id
-       JOIN tests t ON t.id = s.test_id
-       ORDER BY s.submitted_at DESC`
-    );
+    let results = [];
+    if (firebaseStore.isAvailable()) {
+      const fbSubs = await firebaseStore.getSubmissions();
+      if (fbSubs && fbSubs.length > 0) {
+        results = fbSubs.map(s => {
+          let dev = {};
+          try { dev = JSON.parse(s.device_info || '{}'); } catch(e) {}
+          return {
+            id: s.id,
+            student_name: s.user_name || 'Candidate',
+            student_email: s.user_email || 'candidate@gmail.com',
+            test_title: s.test_title || 'CBT Paper',
+            total_score: s.total_score,
+            max_marks: s.max_marks || 300,
+            correct_count: s.correct_count,
+            incorrect_count: s.incorrect_count,
+            unattempted_count: s.unattempted_count,
+            accuracy_percent: s.accuracy_percent,
+            time_taken_sec: s.time_taken_sec,
+            device_info: s.device_info,
+            submitted_at: s.submitted_at
+          };
+        });
+      }
+    }
+
+    if (results.length === 0) {
+      results = await query.all(
+        `SELECT s.id, u.name AS student_name, u.email AS student_email,
+                t.title AS test_title, s.total_score, s.max_marks,
+                s.correct_count, s.incorrect_count, s.unattempted_count,
+                s.accuracy_percent, s.time_taken_sec, s.device_info, s.submitted_at
+         FROM submissions s
+         JOIN users u ON u.id = s.user_id
+         JOIN tests t ON t.id = s.test_id
+         ORDER BY s.submitted_at DESC`
+      );
+    }
 
     let csv = 'ID,Student Name,Email,Test,Score,Max Marks,Correct,Incorrect,Unattempted,Accuracy %,Time (sec),Device OS,Browser,IP,Submitted At\n';
 

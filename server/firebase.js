@@ -13,7 +13,7 @@ let db = null;
 let isInitialized = false;
 
 function initFirebase() {
-  if (isInitialized) return db;
+  if (isInitialized && db) return db;
 
   try {
     let serviceAccount = defaultServiceAccount;
@@ -23,12 +23,16 @@ function initFirebase() {
       } catch (e) {}
     }
 
-    const app = admin.initializeApp({
-      credential: admin.cert(serviceAccount),
-      databaseURL: "https://cbt-checker-default-rtdb.asia-southeast1.firebasedatabase.app"
-    });
+    if (!admin.apps.length) {
+      const app = admin.initializeApp({
+        credential: admin.cert(serviceAccount),
+        databaseURL: "https://cbt-checker-default-rtdb.asia-southeast1.firebasedatabase.app"
+      });
+      db = getDatabase(app);
+    } else {
+      db = getDatabase(admin.apps[0]);
+    }
 
-    db = getDatabase(app);
     isInitialized = true;
     console.log('[Firebase] Successfully connected to Realtime Database for project: cbt-checker');
     return db;
@@ -44,9 +48,7 @@ function safeKey(str) {
 }
 
 const firebaseStore = {
-  isAvailable: () => {
-    return true;
-  },
+  isAvailable: () => true,
 
   getDb: () => initFirebase(),
 
@@ -67,6 +69,18 @@ const firebaseStore = {
     const key = safeKey(email);
     const snap = await rtdb.ref(`cbt/users/${key}`).once('value');
     return snap.val();
+  },
+
+  async getUsersCount() {
+    const rtdb = initFirebase();
+    if (!rtdb) return 0;
+    try {
+      const snap = await rtdb.ref('cbt/users').once('value');
+      const val = snap.val();
+      return val ? Object.keys(val).length : 0;
+    } catch (e) {
+      return 0;
+    }
   },
 
   // Sessions
@@ -141,6 +155,22 @@ const firebaseStore = {
     }
   },
 
+  async getTest(idOrCode) {
+    const rtdb = initFirebase();
+    if (!rtdb || !idOrCode) return null;
+    try {
+      const snap = await rtdb.ref(`cbt/tests/${idOrCode}`).once('value');
+      if (snap.exists()) return snap.val();
+      const codeKey = safeKey(idOrCode);
+      const snap2 = await rtdb.ref(`cbt/tests/${codeKey}`).once('value');
+      if (snap2.exists()) return snap2.val();
+      const all = await this.getTests();
+      return all.find(t => String(t.id) === String(idOrCode) || String(t.test_code).toLowerCase() === String(idOrCode).toLowerCase()) || null;
+    } catch (e) {
+      return null;
+    }
+  },
+
   async deleteTest(testId, testCode = null) {
     const rtdb = initFirebase();
     if (!rtdb) return;
@@ -179,6 +209,23 @@ const firebaseStore = {
       ...submission,
       savedAt: new Date().toISOString()
     });
+  },
+
+  async getSubmission(id) {
+    const rtdb = initFirebase();
+    if (!rtdb || !id) return null;
+    try {
+      const snap = await rtdb.ref(`cbt/submissions/${id}`).once('value');
+      if (snap.exists()) return snap.val();
+      // Search all submissions
+      const allSnap = await rtdb.ref('cbt/submissions').once('value');
+      const val = allSnap.val();
+      if (!val) return null;
+      return Object.values(val).find(s => String(s.id) === String(id)) || null;
+    } catch (e) {
+      console.error('[Firebase] getSubmission error:', e.message);
+      return null;
+    }
   },
 
   async getSubmissions(testId = null) {

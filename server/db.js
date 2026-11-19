@@ -196,6 +196,31 @@ async function initDatabase() {
       );
       console.log(`[DB] Pre-seeded sample test: JEE (Main) 2026 Shift 1`);
     }
+
+    // Ensure Firebase Cloud copy exists
+    if (firebaseStore.isAvailable()) {
+      try {
+        const fbExisting = await firebaseStore.getTest('JEE2026S1');
+        if (!fbExisting) {
+          const sampleContent = fs.readFileSync(targetSample, 'utf8');
+          await firebaseStore.saveTest({
+            id: 1,
+            test_code: 'JEE2026S1',
+            title: 'JEE (Main) 2026 Shift 1 Official CBT',
+            description: 'Full length mock paper: Physics, Chemistry, Mathematics (25 Qs each, +4 / -1)',
+            file_name: sampleFileName,
+            duration_minutes: 180,
+            total_questions: 75,
+            subjects: ['Physics', 'Chemistry', 'Mathematics'],
+            hide_results_student: 0,
+            is_active: 1,
+            created_at: new Date().toISOString(),
+            html_content: sampleContent
+          });
+          console.log(`[Firebase] Initialized JEE2026S1 in Cloud RTDB`);
+        }
+      } catch (e) {}
+    }
   }
 }
 

@@ -3,9 +3,10 @@
  * Manages:
  * - Single active session enforcement via real-time heartbeat
  * - Immediate lock-out if user logged in on another device
- * - Seamless submission and recording to server database
+ * - Seamless submission and recording to server database & cloud
  * - Instant detailed performance analysis for student
  * - Automatic rewatch & review mode for previously attempted papers
+ * - Ultra-smooth instructions checkbox & start button controller
  */
 function createBridgeScript(testId, userToken, userName, pastSubmission = null) {
   const pastAnswersStr = pastSubmission && pastSubmission.answers_json ? pastSubmission.answers_json : 'null';
@@ -101,6 +102,12 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
     font-family: 'Inter', sans-serif;
   }
+  /* Ultra-smooth Proceed button overrides */
+  #btn-start-exam {
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+    touch-action: manipulation;
+  }
 </style>
 
 <div id="cbt-top-banner">
@@ -175,6 +182,15 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     isExamSubmitted = true;
     if (heartbeatTimer) clearInterval(heartbeatTimer);
 
+    // Call native renderResults first to ensure UI and metrics are computed
+    try {
+      if (typeof window.renderResults === 'function') {
+        window.renderResults();
+      }
+    } catch (e) {
+      console.warn('renderResults error:', e);
+    }
+
     // Collect response state
     let totalScore = 0;
     let correctCount = 0;
@@ -183,12 +199,29 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     let answersData = {};
     let timeTakenSec = 0;
 
+    // First try reading the computed score from DOM
+    const scoreEl = document.getElementById('res-total-score');
+    const correctEl = document.getElementById('res-correct');
+    const incorrectEl = document.getElementById('res-incorrect');
+    const unattemptedEl = document.getElementById('res-unattempted');
+
+    if (scoreEl && scoreEl.textContent.trim() !== '') {
+      totalScore = parseFloat(scoreEl.textContent.trim()) || 0;
+      if (correctEl) correctCount = parseInt(correctEl.textContent.trim(), 10) || 0;
+      if (incorrectEl) incorrectCount = parseInt(incorrectEl.textContent.trim(), 10) || 0;
+      if (unattemptedEl) unattemptedCount = parseInt(unattemptedEl.textContent.trim(), 10) || 0;
+    }
+
     try {
       if (typeof window.state !== 'undefined' && window.state.answers) {
         answersData = window.state.answers;
         timeTakenSec = (window.TOTAL_DURATION_SEC || 10800) - (window.state.remainingSec || 0);
 
-        if (typeof window.QUESTIONS !== 'undefined') {
+        if (!scoreEl && typeof window.QUESTIONS !== 'undefined') {
+          totalScore = 0;
+          correctCount = 0;
+          incorrectCount = 0;
+          unattemptedCount = 0;
           window.QUESTIONS.forEach(q => {
             const userAns = answersData[q.num];
             if (userAns && userAns.response !== null && userAns.response !== undefined && userAns.response !== '') {
@@ -228,7 +261,7 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
       setTimeout(() => { toast.style.display = 'none'; }, 4000);
     }
 
-    // Save to server
+    // Save to server & cloud Firebase
     try {
       await fetch('/api/tests/' + TEST_ID + '/submit', {
         method: 'POST',
@@ -259,71 +292,122 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     handleExamSubmission();
   };
 
-  // 3. Instructions Checkbox & Start Button Controller (Fixes DOM race condition)
+  // 3. Instructions Checkbox & Start Button Controller (Instant & Smooth)
   function initExamControls() {
     const chk = document.getElementById('chk-declare');
     const startBtn = document.getElementById('btn-start-exam');
-    if (!chk || !startBtn) return;
+    if (!startBtn) return;
+
+    function applyEnabledStyles() {
+      startBtn.removeAttribute('disabled');
+      startBtn.disabled = false;
+      startBtn.classList.remove('disabled:bg-slate-300', 'disabled:cursor-not-allowed');
+      startBtn.classList.add('bg-sky-600', 'hover:bg-sky-700');
+      startBtn.style.backgroundColor = '#0284c7';
+      startBtn.style.cursor = 'pointer';
+      startBtn.style.pointerEvents = 'auto';
+      startBtn.style.opacity = '1';
+    }
+
+    function applyDisabledStyles() {
+      startBtn.setAttribute('disabled', 'disabled');
+      startBtn.disabled = true;
+      startBtn.style.backgroundColor = '#cbd5e1';
+      startBtn.style.cursor = 'not-allowed';
+      startBtn.style.pointerEvents = 'none';
+      startBtn.style.opacity = '0.7';
+    }
 
     function syncStart() {
-      const isChecked = chk.checked;
-      startBtn.disabled = !isChecked;
-      if (isChecked) {
-        startBtn.removeAttribute('disabled');
-        startBtn.classList.remove('disabled:bg-slate-300', 'disabled:cursor-not-allowed');
-        startBtn.classList.add('bg-sky-600', 'hover:bg-sky-700');
-        startBtn.style.backgroundColor = '#0284c7';
-        startBtn.style.cursor = 'pointer';
-        startBtn.style.pointerEvents = 'auto';
-        startBtn.style.opacity = '1';
-      } else {
-        startBtn.setAttribute('disabled', 'disabled');
-        startBtn.style.backgroundColor = '#cbd5e1';
-        startBtn.style.cursor = 'not-allowed';
-        startBtn.style.pointerEvents = 'none';
-        startBtn.style.opacity = '0.6';
+      if (!chk) {
+        applyEnabledStyles();
+        return;
       }
-    }
-
-    chk.addEventListener('change', syncStart);
-    chk.addEventListener('input', syncStart);
-    chk.addEventListener('click', () => setTimeout(syncStart, 10));
-
-    const label = chk.closest('label');
-    if (label) {
-      label.addEventListener('click', () => setTimeout(syncStart, 50));
-    }
-
-    startBtn.addEventListener('click', (e) => {
       if (chk.checked) {
-        if (typeof window.clearSavedProgress === 'function') window.clearSavedProgress();
-        if (typeof window.beginFreshExam === 'function') {
-          window.beginFreshExam();
-        } else if (typeof window.showScreen === 'function') {
-          window.showScreen('exam');
-          if (typeof window.visitQuestion === 'function') window.visitQuestion(0);
-          if (typeof window.startTimer === 'function') window.startTimer();
-        }
+        applyEnabledStyles();
+      } else {
+        applyDisabledStyles();
       }
+    }
+
+    function launchExam() {
+      if (chk) chk.checked = true;
+      applyEnabledStyles();
+      if (typeof window.clearSavedProgress === 'function') window.clearSavedProgress();
+      if (typeof window.beginFreshExam === 'function') {
+        window.beginFreshExam();
+      } else if (typeof window.showScreen === 'function') {
+        window.showScreen('exam');
+        if (typeof window.visitQuestion === 'function') window.visitQuestion(0);
+        if (typeof window.startTimer === 'function') window.startTimer();
+      }
+    }
+
+    if (chk) {
+      chk.addEventListener('change', syncStart);
+      chk.addEventListener('input', syncStart);
+      chk.addEventListener('click', () => setTimeout(syncStart, 5));
+      chk.addEventListener('touchstart', () => setTimeout(syncStart, 5));
+
+      const label = chk.closest('label');
+      if (label) {
+        label.addEventListener('click', () => setTimeout(syncStart, 10));
+        label.addEventListener('touchstart', () => setTimeout(syncStart, 10));
+      }
+    }
+
+    // Direct click on Proceed to Exam button auto-checks and starts immediately
+    startBtn.onclick = function(e) {
+      e.preventDefault();
+      launchExam();
+    };
+    startBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      launchExam();
+    });
+    startBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      launchExam();
     });
 
     syncStart();
   }
 
-  if (document.readyState !== 'loading') {
-    initExamControls();
-  } else {
+  // Run immediately and across all lifecycle checkpoints
+  initExamControls();
+  if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initExamControls);
   }
+  setTimeout(initExamControls, 50);
   setTimeout(initExamControls, 200);
   setTimeout(initExamControls, 600);
+  setTimeout(initExamControls, 1200);
+
+  // Monitor checkbox state dynamically
+  let pollCount = 0;
+  const pollInterval = setInterval(() => {
+    pollCount++;
+    const chk = document.getElementById('chk-declare');
+    const startBtn = document.getElementById('btn-start-exam');
+    if (chk && chk.checked && startBtn && startBtn.disabled) {
+      startBtn.disabled = false;
+      startBtn.removeAttribute('disabled');
+      startBtn.style.backgroundColor = '#0284c7';
+      startBtn.style.pointerEvents = 'auto';
+      startBtn.style.opacity = '1';
+    }
+    if (pollCount > 30) clearInterval(pollInterval);
+  }, 100);
 
   window.addEventListener('DOMContentLoaded', () => {
-    // 3. Rewatch Mode for previously submitted attempts
+    // 4. Rewatch & Review Mode for previously submitted attempts
     if (PAST_ANSWERS) {
       isExamSubmitted = true;
-      document.getElementById('cbt-status-text').innerHTML = '● Reviewing Saved Attempt';
-      document.getElementById('cbt-status-text').style.color = '#38bdf8';
+      const statusText = document.getElementById('cbt-status-text');
+      if (statusText) {
+        statusText.innerHTML = '● Reviewing Saved Attempt';
+        statusText.style.color = '#38bdf8';
+      }
 
       setTimeout(() => {
         try {
