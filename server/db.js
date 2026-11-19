@@ -116,6 +116,16 @@ async function initDatabase() {
       FOREIGN KEY(test_id) REFERENCES tests(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS system_config (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS deleted_tests (
+      test_code TEXT PRIMARY KEY,
+      deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_user_active ON sessions(user_id, is_active);
     CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
     CREATE INDEX IF NOT EXISTS idx_submissions_user_test ON submissions(user_id, test_id);
@@ -145,7 +155,13 @@ async function initDatabase() {
     }
   }
 
-  // Pre-seed sample test if available
+  // Pre-seed sample test ONCE if available and never deleted by admin
+  const isDeleted = await query.get('SELECT * FROM deleted_tests WHERE test_code = ?', ['JEE2026S1']);
+  const isFbDeleted = await firebaseStore.isTestDeleted('JEE2026S1');
+  if (isDeleted || isFbDeleted) {
+    return; // Admin deleted this test, do not re-seed!
+  }
+
   const sampleFileName = 'sample_jee_main_2026.html';
   const bundledSample = path.join(__dirname, 'uploads', sampleFileName);
   const targetUploadDir = process.env.UPLOAD_DIR || (process.env.VERCEL ? '/tmp/uploads' : path.join(__dirname, 'uploads'));
@@ -174,7 +190,7 @@ async function initDatabase() {
           180,
           75,
           JSON.stringify(['Physics', 'Chemistry', 'Mathematics']),
-          1 // Results visible to Admin only by default as requested
+          0 // Detailed analysis enabled
         ]
       );
       console.log(`[DB] Pre-seeded sample test: JEE (Main) 2026 Shift 1`);

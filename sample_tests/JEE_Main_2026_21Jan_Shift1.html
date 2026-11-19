@@ -1400,8 +1400,8 @@
       startTimer();
     }
 
-    // Wire up all event listeners cleanly on DOMContentLoaded
-    document.addEventListener('DOMContentLoaded', () => {
+    // Wire up all event listeners cleanly
+    function setupCbtEventListeners() {
       state.answers = initAnswers();
 
       // Check for saved attempt
@@ -1550,7 +1550,13 @@
         document.getElementById('resume-banner').classList.add('hidden');
         showScreen('instructions');
       });
-    });
+    }
+
+    if (document.readyState !== 'loading') {
+      setupCbtEventListeners();
+    } else {
+      document.addEventListener('DOMContentLoaded', setupCbtEventListeners);
+    }
   </script>
 </body>
 </html>

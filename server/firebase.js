@@ -117,6 +117,59 @@ const firebaseStore = {
     }
   },
 
+  // Tests (Cloud Test Catalog)
+  async saveTest(test) {
+    const rtdb = initFirebase();
+    if (!rtdb) return;
+    const key = String(test.id || safeKey(test.test_code));
+    await rtdb.ref(`cbt/tests/${key}`).set({
+      ...test,
+      updatedAt: new Date().toISOString()
+    });
+  },
+
+  async getTests() {
+    const rtdb = initFirebase();
+    if (!rtdb) return [];
+    try {
+      const snap = await rtdb.ref('cbt/tests').once('value');
+      const val = snap.val();
+      if (!val) return [];
+      return Object.values(val);
+    } catch (e) {
+      return [];
+    }
+  },
+
+  async deleteTest(testId, testCode = null) {
+    const rtdb = initFirebase();
+    if (!rtdb) return;
+    try {
+      // Remove from active tests
+      await rtdb.ref(`cbt/tests/${testId}`).remove();
+      if (testCode) {
+        await rtdb.ref(`cbt/tests/${safeKey(testCode)}`).remove();
+        // Record in deleted_tests to prevent auto-re-seeding
+        await rtdb.ref(`cbt/deleted_tests/${safeKey(testCode)}`).set({
+          deletedAt: new Date().toISOString()
+        });
+      }
+    } catch (e) {
+      console.error('[Firebase] deleteTest error:', e.message);
+    }
+  },
+
+  async isTestDeleted(testCode) {
+    const rtdb = initFirebase();
+    if (!rtdb || !testCode) return false;
+    try {
+      const snap = await rtdb.ref(`cbt/deleted_tests/${safeKey(testCode)}`).once('value');
+      return snap.exists();
+    } catch (e) {
+      return false;
+    }
+  },
+
   // Submissions (Persistent Exam Records)
   async saveSubmission(submission) {
     const rtdb = initFirebase();

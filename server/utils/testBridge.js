@@ -259,6 +259,65 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     handleExamSubmission();
   };
 
+  // 3. Instructions Checkbox & Start Button Controller (Fixes DOM race condition)
+  function initExamControls() {
+    const chk = document.getElementById('chk-declare');
+    const startBtn = document.getElementById('btn-start-exam');
+    if (!chk || !startBtn) return;
+
+    function syncStart() {
+      const isChecked = chk.checked;
+      startBtn.disabled = !isChecked;
+      if (isChecked) {
+        startBtn.removeAttribute('disabled');
+        startBtn.classList.remove('disabled:bg-slate-300', 'disabled:cursor-not-allowed');
+        startBtn.classList.add('bg-sky-600', 'hover:bg-sky-700');
+        startBtn.style.backgroundColor = '#0284c7';
+        startBtn.style.cursor = 'pointer';
+        startBtn.style.pointerEvents = 'auto';
+        startBtn.style.opacity = '1';
+      } else {
+        startBtn.setAttribute('disabled', 'disabled');
+        startBtn.style.backgroundColor = '#cbd5e1';
+        startBtn.style.cursor = 'not-allowed';
+        startBtn.style.pointerEvents = 'none';
+        startBtn.style.opacity = '0.6';
+      }
+    }
+
+    chk.addEventListener('change', syncStart);
+    chk.addEventListener('input', syncStart);
+    chk.addEventListener('click', () => setTimeout(syncStart, 10));
+
+    const label = chk.closest('label');
+    if (label) {
+      label.addEventListener('click', () => setTimeout(syncStart, 50));
+    }
+
+    startBtn.addEventListener('click', (e) => {
+      if (chk.checked) {
+        if (typeof window.clearSavedProgress === 'function') window.clearSavedProgress();
+        if (typeof window.beginFreshExam === 'function') {
+          window.beginFreshExam();
+        } else if (typeof window.showScreen === 'function') {
+          window.showScreen('exam');
+          if (typeof window.visitQuestion === 'function') window.visitQuestion(0);
+          if (typeof window.startTimer === 'function') window.startTimer();
+        }
+      }
+    });
+
+    syncStart();
+  }
+
+  if (document.readyState !== 'loading') {
+    initExamControls();
+  } else {
+    document.addEventListener('DOMContentLoaded', initExamControls);
+  }
+  setTimeout(initExamControls, 200);
+  setTimeout(initExamControls, 600);
+
   window.addEventListener('DOMContentLoaded', () => {
     // 3. Rewatch Mode for previously submitted attempts
     if (PAST_ANSWERS) {

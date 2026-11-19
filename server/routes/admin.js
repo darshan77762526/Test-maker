@@ -337,6 +337,12 @@ router.delete('/tests/:id', async (req, res) => {
     await query.run('DELETE FROM submissions WHERE test_id = ?', [testId]);
     await query.run('DELETE FROM tests WHERE id = ?', [testId]);
 
+    // Track in deleted_tests to ensure auto-seeding NEVER revives it
+    if (test.test_code) {
+      await query.run('INSERT OR IGNORE INTO deleted_tests (test_code) VALUES (?)', [test.test_code]).catch(() => {});
+      firebaseStore.deleteTest(testId, test.test_code).catch(() => {});
+    }
+
     return res.json({ message: 'Test and associated submissions deleted successfully' });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to delete test' });
