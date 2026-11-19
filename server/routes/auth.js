@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const { query } = require('../db');
 const { authenticate, JWT_SECRET } = require('../middleware/auth');
 const { parseDevice } = require('../middleware/device');
+const firebaseStore = require('../firebase');
 
 // Email regex validation
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -43,6 +44,15 @@ router.post('/register', async (req, res) => {
       'INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
       [cleanName, cleanEmail, passwordHash, 'STUDENT']
     );
+
+    // Sync to Firebase if connected
+    firebaseStore.saveUser({
+      id: result.lastID,
+      name: cleanName,
+      email: cleanEmail,
+      role: 'STUDENT',
+      createdAt: new Date().toISOString()
+    }).catch(() => {});
 
     return res.status(201).json({
       message: 'Account created successfully! You can now log in.',
@@ -91,9 +101,16 @@ router.post('/login', parseDevice, async (req, res) => {
     const device = req.clientDevice;
     const finalScreenSize = screenSize || device.screenSize || 'Unknown';
 
-    // Generate token
+    // Generate token with complete identity payload
     const token = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
+      {
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        deviceOs: device.os,
+        deviceBrowser: device.browser
+      },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -114,6 +131,24 @@ router.post('/login', parseDevice, async (req, res) => {
         device.userAgent
       ]
     );
+
+    // Sync session to Firebase if configured
+    firebaseStore.terminateOldSessions(user.id, token).catch(() => {});
+    firebaseStore.saveSession({
+      id: sessionResult.lastID,
+      user_id: user.id,
+      user_email: user.email,
+      user_name: user.name,
+      token,
+      device_os: device.os,
+      device_browser: device.browser,
+      device_type: device.deviceType,
+      screen_size: finalScreenSize,
+      ip_address: device.ip,
+      login_at: new Date().toISOString(),
+      last_ping_at: new Date().toISOString(),
+      is_active: 1
+    }).catch(() => {});
 
     return res.json({
       message: 'Login successful',

@@ -5,6 +5,7 @@ const fs = require('fs');
 const { query } = require('../db');
 const { authenticate } = require('../middleware/auth');
 const { createBridgeScript } = require('../utils/testBridge');
+const firebaseStore = require('../firebase');
 
 /**
  * GET /api/tests
@@ -77,12 +78,18 @@ router.get('/:id/run', authenticate, async (req, res) => {
 
     let html = fs.readFileSync(filePath, 'utf8');
 
+    // Retrieve past submission if student previously attempted this test
+    const pastSubmission = await query.get(
+      'SELECT answers_json, total_score, submitted_at FROM submissions WHERE test_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1',
+      [testId, req.user.id]
+    );
+
     // Create the security & sync bridge
     const bridgeCode = createBridgeScript(
       test.id,
-      !!test.hide_results_student && req.user.role !== 'ADMIN',
       req.session.token,
-      req.user.name
+      req.user.name,
+      pastSubmission
     );
 
     // Inject before </body>
@@ -152,11 +159,32 @@ router.post('/:id/submit', authenticate, async (req, res) => {
       ]
     );
 
+    // Sync submission to Firebase if connected
+    firebaseStore.saveSubmission({
+      id: result.lastID,
+      user_id: req.user.id,
+      user_email: req.user.email,
+      user_name: req.user.name,
+      test_id: testId,
+      test_code: test.test_code,
+      test_title: test.title,
+      total_score: totalScore,
+      max_marks: maxMarks,
+      correct_count: correctCount,
+      incorrect_count: incorrectCount,
+      unattempted_count: unattemptedCount,
+      accuracy_percent: accuracy,
+      time_taken_sec: timeTakenSec,
+      answers_json: typeof answersJson === 'string' ? answersJson : JSON.stringify(answersJson),
+      device_info: deviceInfo,
+      submitted_at: new Date().toISOString()
+    }).catch(() => {});
+
     return res.json({
       message: 'Submission successfully recorded',
       submissionId: result.lastID,
-      score: !test.hide_results_student || req.user.role === 'ADMIN' ? totalScore : null,
-      hideResultsStudent: !!test.hide_results_student
+      score: totalScore,
+      accuracy
     });
   } catch (error) {
     console.error('Submit test error:', error);

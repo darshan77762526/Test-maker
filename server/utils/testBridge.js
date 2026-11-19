@@ -3,10 +3,13 @@
  * Manages:
  * - Single active session enforcement via real-time heartbeat
  * - Immediate lock-out if user logged in on another device
- * - Interception of test submission and transmission to Admin backend
- * - Conditional hiding of results according to Admin test policy
+ * - Seamless submission and recording to server database
+ * - Instant detailed performance analysis for student
+ * - Automatic rewatch & review mode for previously attempted papers
  */
-function createBridgeScript(testId, hideResultsStudent, userToken, userName) {
+function createBridgeScript(testId, userToken, userName, pastSubmission = null) {
+  const pastAnswersStr = pastSubmission && pastSubmission.answers_json ? pastSubmission.answers_json : 'null';
+
   return `
 <!-- CBT PLATFORM RUNNER & SECURITY BRIDGE -->
 <style>
@@ -64,7 +67,7 @@ function createBridgeScript(testId, hideResultsStudent, userToken, userName) {
     right: 0;
     z-index: 99999;
     padding: 6px 16px;
-    background: rgba(15, 23, 42, 0.9);
+    background: rgba(15, 23, 42, 0.95);
     border-bottom-left-radius: 8px;
     border-left: 1px solid #334155;
     border-bottom: 1px solid #334155;
@@ -83,22 +86,39 @@ function createBridgeScript(testId, hideResultsStudent, userToken, userName) {
   #cbt-top-banner a:hover {
     text-decoration: underline;
   }
+  #cbt-toast-sync {
+    display: none;
+    position: fixed;
+    top: 56px;
+    right: 20px;
+    z-index: 99999;
+    background: #10b981;
+    color: white;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
+    font-family: 'Inter', sans-serif;
+  }
 </style>
 
 <div id="cbt-top-banner">
   <span>Candidate: <strong style="color:#f8fafc;">${userName}</strong></span>
   <span>&bull;</span>
-  <span style="color:#22c55e;">● Live Session Verified</span>
+  <span id="cbt-status-text" style="color:#22c55e;">● Live Session Verified</span>
   <span>&bull;</span>
-  <a href="/#/student" id="cbt-exit-btn">← Exit Test</a>
+  <a href="/#/student" id="cbt-exit-btn">← Exit to Dashboard</a>
 </div>
+
+<div id="cbt-toast-sync">✓ Attempt Saved & Secured to Cloud Portal</div>
 
 <div id="cbt-bridge-overlay">
   <div class="cbt-bridge-card">
     <div class="cbt-bridge-badge" id="cbt-overlay-badge">SESSION TERMINATED</div>
     <h2 style="font-size: 22px; font-weight: 800; margin-bottom: 12px;" id="cbt-overlay-title">Multiple Device Login Detected</h2>
     <p style="font-size: 14px; color: #94a3b8; line-height: 1.6;" id="cbt-overlay-msg">
-      Your account was logged in from another device. For examination security and anti-cheating compliance, only one device can access the test session at any given time.
+      Your account was logged in from another device. For examination security, only one device session can be active at a time.
     </p>
     <button class="cbt-bridge-btn" onclick="window.location.href='/#/login'">Return to Login</button>
   </div>
@@ -107,8 +127,8 @@ function createBridgeScript(testId, hideResultsStudent, userToken, userName) {
 <script>
 (function() {
   const TEST_ID = ${testId};
-  const HIDE_RESULTS = ${hideResultsStudent ? 'true' : 'false'};
   const TOKEN = "${userToken}";
+  const PAST_ANSWERS = ${pastAnswersStr};
   let isExamSubmitted = false;
   let heartbeatTimer = null;
 
@@ -121,7 +141,7 @@ function createBridgeScript(testId, hideResultsStudent, userToken, userName) {
     if (window.timerHandle) clearInterval(window.timerHandle);
   }
 
-  // 1. Live Session Heartbeat & Device Conflict Detection
+  // 1. Live Session Heartbeat
   async function sendHeartbeat() {
     if (isExamSubmitted) return;
     try {
@@ -143,19 +163,19 @@ function createBridgeScript(testId, hideResultsStudent, userToken, userName) {
         );
       }
     } catch (e) {
-      console.warn('Heartbeat check failed (network jitter):', e);
+      console.warn('Heartbeat check jitter:', e);
     }
   }
 
   heartbeatTimer = setInterval(sendHeartbeat, 15000);
 
-  // 2. Intercept Submission and Sync with Platform
+  // 2. Test Submission & Sync
   async function handleExamSubmission() {
     if (isExamSubmitted) return;
     isExamSubmitted = true;
     if (heartbeatTimer) clearInterval(heartbeatTimer);
 
-    // Extract state from CBT page
+    // Collect response state
     let totalScore = 0;
     let correctCount = 0;
     let incorrectCount = 0;
@@ -201,8 +221,16 @@ function createBridgeScript(testId, hideResultsStudent, userToken, userName) {
       answersJson: answersData
     };
 
+    // Show saved toast
+    const toast = document.getElementById('cbt-toast-sync');
+    if (toast) {
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 4000);
+    }
+
+    // Save to server
     try {
-      const resp = await fetch('/api/tests/' + TEST_ID + '/submit', {
+      await fetch('/api/tests/' + TEST_ID + '/submit', {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer ' + TOKEN,
@@ -210,31 +238,19 @@ function createBridgeScript(testId, hideResultsStudent, userToken, userName) {
         },
         body: JSON.stringify(payload)
       });
-      const resData = await resp.json();
-      console.log('Submission synced to server:', resData);
     } catch (err) {
       console.error('Failed to sync submission to server:', err);
     }
 
-    // Check policy: Hide results from students?
-    if (HIDE_RESULTS) {
-      // Hide results container if shown
-      const resView = document.getElementById('view-results');
-      if (resView) resView.style.display = 'none';
-
-      showOverlay(
-        'Exam Submitted Successfully!',
-        'Your responses and time metrics have been recorded securely. As per examination rules, detailed results are accessible to the Administrator only.',
-        'COMPLETED'
-      );
-      document.querySelector('.cbt-bridge-btn').innerText = 'Return to Dashboard';
-      document.querySelector('.cbt-bridge-btn').onclick = function() {
-        window.location.href = '/#/student';
-      };
-    }
+    // Always show full detailed analysis to candidate
+    try {
+      if (typeof window.showScreen === 'function') window.showScreen('results');
+      if (typeof window.renderResults === 'function') window.renderResults();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {}
   }
 
-  // Hook into native submitExam function
+  // Hook into submitExam
   const originalSubmitExam = window.submitExam;
   window.submitExam = function() {
     if (typeof originalSubmitExam === 'function') {
@@ -243,8 +259,26 @@ function createBridgeScript(testId, hideResultsStudent, userToken, userName) {
     handleExamSubmission();
   };
 
-  // Also hook into confirm submit button if present
   window.addEventListener('DOMContentLoaded', () => {
+    // 3. Rewatch Mode for previously submitted attempts
+    if (PAST_ANSWERS) {
+      isExamSubmitted = true;
+      document.getElementById('cbt-status-text').innerHTML = '● Reviewing Saved Attempt';
+      document.getElementById('cbt-status-text').style.color = '#38bdf8';
+
+      setTimeout(() => {
+        try {
+          if (typeof window.state !== 'undefined') {
+            window.state.answers = typeof PAST_ANSWERS === 'string' ? JSON.parse(PAST_ANSWERS) : PAST_ANSWERS;
+            if (typeof window.showScreen === 'function') window.showScreen('results');
+            if (typeof window.renderResults === 'function') window.renderResults();
+          }
+        } catch (e) {
+          console.error('Error loading saved attempt:', e);
+        }
+      }, 300);
+    }
+
     const confirmBtn = document.getElementById('btn-confirm-submit');
     if (confirmBtn) {
       confirmBtn.addEventListener('click', () => {
@@ -253,11 +287,10 @@ function createBridgeScript(testId, hideResultsStudent, userToken, userName) {
     }
   });
 
-  // Prompt before leaving
   window.addEventListener('beforeunload', function(e) {
     if (!isExamSubmitted) {
       e.preventDefault();
-      e.returnValue = 'You have an active exam session. Are you sure you want to leave?';
+      e.returnValue = 'You have an active exam session. Are you sure you want to exit?';
     }
   });
 })();

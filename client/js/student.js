@@ -74,30 +74,18 @@ window.StudentModule = {
 
       let actionSection = '';
       if (test.hasSubmitted) {
-        if (!test.hideResultsStudent && test.userScore !== null) {
-          actionSection = `
-            <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between">
-              <div>
-                <span class="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">Submitted</span>
-                <span class="text-base font-extrabold text-emerald-700">Score: ${test.userScore}</span>
-              </div>
-              <a href="/api/tests/${test.id}/run?token=${App.token}" target="_blank" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1">
-                <span>Review</span>
-                <i class="fa-solid fa-arrow-up-right-from-square"></i>
-              </a>
+        actionSection = `
+          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span class="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">Attempt Completed</span>
+              <span class="text-xs font-bold text-emerald-700">Detailed Analysis Ready</span>
             </div>
-          `;
-        } else {
-          actionSection = `
-            <div class="bg-slate-100 border border-slate-200 rounded-xl p-3 text-center">
-              <span class="text-xs font-bold text-slate-700 flex items-center justify-center gap-1.5">
-                <i class="fa-solid fa-check-circle text-emerald-600"></i>
-                <span>Attempt Completed</span>
-              </span>
-              <p class="text-[11px] text-slate-500 mt-0.5">Responses secured. Results managed by Admin.</p>
-            </div>
-          `;
-        }
+            <a href="/api/tests/${test.id}/run?token=${App.token}" target="_blank" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
+              <span>Rewatch & Review</span>
+              <i class="fa-solid fa-square-poll-vertical"></i>
+            </a>
+          </div>
+        `;
       } else {
         actionSection = `
           <a href="/api/tests/${test.id}/run?token=${App.token}" target="_blank" class="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2">

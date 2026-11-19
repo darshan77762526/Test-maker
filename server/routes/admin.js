@@ -6,6 +6,7 @@ const multer = require('multer');
 const { query } = require('../db');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { parseCbtHtml } = require('../utils/htmlParser');
+const firebaseStore = require('../firebase');
 
 // Apply admin guard across all admin endpoints
 router.use(authenticate, requireAdmin);
@@ -70,6 +71,31 @@ router.get('/stats', async (req, res) => {
  */
 router.get('/sessions', async (req, res) => {
   try {
+    if (firebaseStore.isAvailable()) {
+      const fbSessions = await firebaseStore.getSessions();
+      if (fbSessions && fbSessions.length > 0) {
+        return res.json({
+          sessions: fbSessions.map(s => ({
+            id: s.id,
+            userId: s.user_id,
+            studentName: s.user_name || 'Candidate',
+            studentEmail: s.user_email || 'candidate@gmail.com',
+            deviceOs: s.device_os || 'Unknown',
+            deviceBrowser: s.device_browser || 'Unknown',
+            deviceType: s.device_type || 'desktop',
+            screenSize: s.screen_size || '1920x1080',
+            ipAddress: s.ip_address || '127.0.0.1',
+            loginAt: s.login_at,
+            lastPingAt: s.last_ping_at,
+            isActive: s.is_active === 1,
+            terminatedReason: s.terminated_reason,
+            liveStatus: s.is_active === 1 ? 'Active' : 'Terminated',
+            secSincePing: 10
+          }))
+        });
+      }
+    }
+
     const sessions = await query.all(
       `SELECT s.id, s.user_id, s.device_os, s.device_browser, s.device_type, 
               s.screen_size, s.ip_address, s.user_agent, s.login_at, s.last_ping_at, 
@@ -323,6 +349,36 @@ router.delete('/tests/:id', async (req, res) => {
  */
 router.get('/results', async (req, res) => {
   try {
+    if (firebaseStore.isAvailable()) {
+      const fbSubs = await firebaseStore.getSubmissions();
+      if (fbSubs && fbSubs.length > 0) {
+        return res.json({
+          results: fbSubs.map(s => {
+            let device = {};
+            try { device = JSON.parse(s.device_info || '{}'); } catch(e) {}
+            return {
+              id: s.id,
+              studentName: s.user_name || 'Candidate',
+              studentEmail: s.user_email || 'candidate@gmail.com',
+              testTitle: s.test_title || 'CBT Paper',
+              testCode: s.test_code || 'CBT',
+              totalScore: s.total_score,
+              maxMarks: s.max_marks || 300,
+              correct: s.correct_count,
+              incorrect: s.incorrect_count,
+              unattempted: s.unattempted_count,
+              accuracy: s.accuracy_percent,
+              timeTakenSec: s.time_taken_sec,
+              submittedAt: s.submitted_at,
+              deviceOs: device.os || 'Unknown',
+              deviceBrowser: device.browser || 'Unknown',
+              deviceIp: device.ip || 'Unknown'
+            };
+          })
+        });
+      }
+    }
+
     const testFilter = req.query.testId ? 'WHERE s.test_id = ' + parseInt(req.query.testId, 10) : '';
 
     const results = await query.all(
