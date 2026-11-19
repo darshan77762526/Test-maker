@@ -2,6 +2,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const firebaseStore = require('./firebase');
 
 const isVercel = !!process.env.VERCEL;
 const dataDir = process.env.DATA_DIR || (isVercel ? '/tmp/data' : path.join(__dirname, '..', 'data'));
