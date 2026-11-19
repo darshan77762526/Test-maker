@@ -1,4 +1,13 @@
 const admin = require('firebase-admin');
+const { getDatabase } = require('firebase-admin/database');
+
+const defaultServiceAccount = {
+  "type": "service_account",
+  "project_id": "cbt-checker",
+  "private_key_id": "895a2d0fa3dd5493a1734b08f3ffdd8f63c63413",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCrCnDse/bAyeDz\nVATgCThBrD1R7gITEC/vIznu8MxJu6qQBHxPgJU4EXc/P2oIWqzl51yet6SF0fb2\nFJZUCp0ESJa1qR7AfidvhJAMdTE4pMXTjuIy0U+ks1FsbfaGQ7ugTqSLBZH3nThK\nmBcbwmSu4i4wmGrgCOtxYAunygahXRlELSwP8oAWf95DvDEoV/D7AoheHU1kmSAT\nFLCJtHLDnG4fCKo50xycnptTMFThc8Q79mzY8ZCot2U4b3Q7SU+FDEtZX4wrpXc9\nNfq/d262UBE5wBRE35PWmTn3EU8phLFtlSZ6dDx6LGYVULCpCzhe4q8E0jc3Jvvy\neiE0f677AgMBAAECggEAIpk9GIlG896ic3ZWeh9DUv2NdepIXyTSHXSpvmzVVkDx\nEqrlnotrI+lcjt28DC6TdPolITISxMMhSswFUMDI3Fn2qo6oWtXqEkPlg6+dIlEq\nd04a8Z6nlrBzUxS3XpeK97WQ0VJyIX2bKnOzkPj0tu+n2kqqq+ECB3AfS3SxfKhs\nsYH0bGmrYcykn3DtLSBVdAwcCSIMlKAjAxSZo8YL24kcK7SaKRKPuUnQ9Tr5C93S\nAqTCboTuwIJkBr9riDjSYTwtMRUVSN1Smf3Al9ll8R6grTlgIWHunraz7Q0f6nws\nNWfdiSB8jdFNLoE7XA8EMRmZTpVGXvm4sYF/iyskGQKBgQDcyEE17GyXUPtDFUr+\nWpy+gn8oAlLUkCvyxmR32oJ8uqtrAuGFvoAouxu65UTaYa8iIrg9LFXvuB/+1O1q\nEBbs+EKbqYHuGWzr2WV7jP6rLeEhjeHKhnaiip0Ear36n02k/+r9EmnZ6tPC9b+r\nHnVXV2fuMJPS2OKYAR48XlyQtQKBgQDGUviIsuIBWEcYCrUBVDgp8ouGGyM1oqY6\nMd+da5hQaph1qeqCjLpsK1M2pmyBm8Vej4ZFZKtIx1JufxgYvF3hSLUXzfI76qlA\nTe3CqBeso9LzEqhJ9fwH74UgwWPSc8ZC80DwjmkDS4y3wC8F8PZ3L5J/Uvyo6nXB\nK3XxYB3+7wKBgQDK21TPbwP3pHi5En9tZWRPxyd+Y2Qn2rAGyTLWzPbIE9wc3vDI\nKlknE4RPHQk+fjKkcrJFws7TC6KaSpo5sb7ezNymmgC//KyPp5gPBWWZcvZAFlU3\n+IRYpHPQ8yLLfEOjL2GCVcDccV9Q6uvJFptKPQ1JVWj9ejn44E4fubPjYQKBgGXC\njum9N3/PJvNsEwHyj7reS77sz70mjrpPetiQK6Afgcjl/YEs6j60YEcrT4OVRMlH\nRXL3u3dlZqNxrRCMHnOI1fq33nHl7yAinDuD+lnH2WaFjTod8Eq2GI39DNYgN3uE\nyy5jM/jP3A0wnDAlOqFfFIEmOKQHYZJTVXobgmibAoGBANHoL8JD0u7x0Wx/RfSt\nHw9R3PcSD+KrODlJS/LW0F9ARd2To5tH1QxD6RwfLss8qNnyfl+bHDOI6QcCVpRg\nKsCw4qspBtdN2yksQdX+P78j7PAvUA82Y3JSOSJbSFJNXEBscPoWg7j42N5gh9LF\nu+BC3fEIHXRbCZMxDHLh9/9O\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@cbt-checker.iam.gserviceaccount.com"
+};
 
 let db = null;
 let isInitialized = false;
@@ -6,153 +15,150 @@ let isInitialized = false;
 function initFirebase() {
   if (isInitialized) return db;
 
-  // Option 1: Full service account JSON provided in environment
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    try {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-      });
-      db = admin.firestore();
-      isInitialized = true;
-      console.log('[Firebase] Connected to Firestore via FIREBASE_SERVICE_ACCOUNT');
-      return db;
-    } catch (e) {
-      console.error('[Firebase] Error parsing FIREBASE_SERVICE_ACCOUNT:', e.message);
+  try {
+    let serviceAccount = defaultServiceAccount;
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      try {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      } catch (e) {}
     }
-  }
 
-  // Option 2: Individual environment variables
-  if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
-    try {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          // Handle multiline private key from env
-          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-        })
-      });
-      db = admin.firestore();
-      isInitialized = true;
-      console.log('[Firebase] Connected to Firestore via Project ID:', process.env.FIREBASE_PROJECT_ID);
-      return db;
-    } catch (e) {
-      console.error('[Firebase] Error initializing Firebase with individual keys:', e.message);
-    }
-  }
+    const app = admin.initializeApp({
+      credential: admin.cert(serviceAccount),
+      databaseURL: "https://cbt-checker-default-rtdb.asia-southeast1.firebasedatabase.app"
+    });
 
-  // Option 3: Default application credentials (e.g. Google Cloud / Firebase hosting)
-  if (process.env.FIREBASE_PROJECT_ID) {
-    try {
-      admin.initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID
-      });
-      db = admin.firestore();
-      isInitialized = true;
-      console.log('[Firebase] Connected to Firestore with default credentials for:', process.env.FIREBASE_PROJECT_ID);
-      return db;
-    } catch (e) {
-      console.error('[Firebase] Default credential initialization error:', e.message);
-    }
+    db = getDatabase(app);
+    isInitialized = true;
+    console.log('[Firebase] Successfully connected to Realtime Database for project: cbt-checker');
+    return db;
+  } catch (err) {
+    console.error('[Firebase] Init error:', err.message);
+    return null;
   }
+}
 
-  return null;
+// Helper to escape keys for Realtime Database (no '.', '$', '#', '[', ']')
+function safeKey(str) {
+  return String(str || '').toLowerCase().replace(/[\.#\$\[\]\/]/g, '_');
 }
 
 const firebaseStore = {
   isAvailable: () => {
-    return !!initFirebase();
+    return true;
   },
 
   getDb: () => initFirebase(),
 
   // Users
   async saveUser(user) {
-    const firestore = initFirebase();
-    if (!firestore) return;
-    await firestore.collection('users').doc(user.email.toLowerCase()).set({
+    const rtdb = initFirebase();
+    if (!rtdb || !user.email) return;
+    const key = safeKey(user.email);
+    await rtdb.ref(`cbt/users/${key}`).set({
       ...user,
-      email: user.email.toLowerCase(),
       updatedAt: new Date().toISOString()
-    }, { merge: true });
+    });
   },
 
   async getUser(email) {
-    const firestore = initFirebase();
-    if (!firestore) return null;
-    const doc = await firestore.collection('users').doc(email.toLowerCase()).get();
-    return doc.exists ? doc.data() : null;
+    const rtdb = initFirebase();
+    if (!rtdb || !email) return null;
+    const key = safeKey(email);
+    const snap = await rtdb.ref(`cbt/users/${key}`).once('value');
+    return snap.val();
   },
 
   // Sessions
   async saveSession(session) {
-    const firestore = initFirebase();
-    if (!firestore) return;
-    await firestore.collection('sessions').doc(String(session.id || session.token)).set({
+    const rtdb = initFirebase();
+    if (!rtdb) return;
+    const key = String(session.id || safeKey(session.token));
+    await rtdb.ref(`cbt/sessions/${key}`).set({
       ...session,
       updatedAt: new Date().toISOString()
-    }, { merge: true });
+    });
   },
 
   async getSessions() {
-    const firestore = initFirebase();
-    if (!firestore) return [];
-    const snapshot = await firestore.collection('sessions').orderBy('last_ping_at', 'desc').limit(100).get();
-    return snapshot.docs.map(doc => doc.data());
+    const rtdb = initFirebase();
+    if (!rtdb) return [];
+    try {
+      const snap = await rtdb.ref('cbt/sessions').limitToLast(100).once('value');
+      const val = snap.val();
+      if (!val) return [];
+      return Object.values(val).sort((a, b) => new Date(b.last_ping_at || b.login_at || 0) - new Date(a.last_ping_at || a.login_at || 0));
+    } catch (e) {
+      console.error('[Firebase] getSessions error:', e.message);
+      return [];
+    }
   },
 
   async terminateOldSessions(userId, currentToken) {
-    const firestore = initFirebase();
-    if (!firestore) return;
-    const snapshot = await firestore.collection('sessions')
-      .where('user_id', '==', userId)
-      .where('is_active', '==', 1)
-      .get();
-
-    const batch = firestore.batch();
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
-      if (data.token !== currentToken) {
-        batch.update(doc.ref, {
-          is_active: 0,
-          terminated_reason: 'new_login_on_different_device',
-          terminated_at: new Date().toISOString()
-        });
+    const rtdb = initFirebase();
+    if (!rtdb) return;
+    try {
+      const snap = await rtdb.ref('cbt/sessions').once('value');
+      const val = snap.val();
+      if (!val) return;
+      const updates = {};
+      Object.entries(val).forEach(([key, s]) => {
+        if (s.user_id === userId && s.token !== currentToken && s.is_active === 1) {
+          updates[`cbt/sessions/${key}/is_active`] = 0;
+          updates[`cbt/sessions/${key}/terminated_reason`] = 'new_login_on_different_device';
+          updates[`cbt/sessions/${key}/terminated_at`] = new Date().toISOString();
+        }
+      });
+      if (Object.keys(updates).length > 0) {
+        await rtdb.ref().update(updates);
       }
-    });
-    await batch.commit();
+    } catch (e) {
+      console.error('[Firebase] terminateOldSessions error:', e.message);
+    }
   },
 
   // Submissions (Persistent Exam Records)
   async saveSubmission(submission) {
-    const firestore = initFirebase();
-    if (!firestore) return;
-    await firestore.collection('submissions').doc(String(submission.id || Date.now())).set({
+    const rtdb = initFirebase();
+    if (!rtdb) return;
+    const key = String(submission.id || Date.now());
+    await rtdb.ref(`cbt/submissions/${key}`).set({
       ...submission,
       savedAt: new Date().toISOString()
     });
   },
 
   async getSubmissions(testId = null) {
-    const firestore = initFirebase();
-    if (!firestore) return [];
-    let ref = firestore.collection('submissions');
-    if (testId) {
-      ref = ref.where('test_id', '==', testId);
+    const rtdb = initFirebase();
+    if (!rtdb) return [];
+    try {
+      const snap = await rtdb.ref('cbt/submissions').limitToLast(200).once('value');
+      const val = snap.val();
+      if (!val) return [];
+      let list = Object.values(val);
+      if (testId) {
+        list = list.filter(s => String(s.test_id) === String(testId));
+      }
+      return list.sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
+    } catch (e) {
+      console.error('[Firebase] getSubmissions error:', e.message);
+      return [];
     }
-    const snapshot = await ref.orderBy('submitted_at', 'desc').get();
-    return snapshot.docs.map(doc => doc.data());
   },
 
   async getStudentSubmissions(userId) {
-    const firestore = initFirebase();
-    if (!firestore) return [];
-    const snapshot = await firestore.collection('submissions')
-      .where('user_id', '==', userId)
-      .orderBy('submitted_at', 'desc')
-      .get();
-    return snapshot.docs.map(doc => doc.data());
+    const rtdb = initFirebase();
+    if (!rtdb) return [];
+    try {
+      const snap = await rtdb.ref('cbt/submissions').once('value');
+      const val = snap.val();
+      if (!val) return [];
+      return Object.values(val)
+        .filter(s => String(s.user_id) === String(userId))
+        .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
+    } catch (e) {
+      return [];
+    }
   }
 };
 
