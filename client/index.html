@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CBT Portal — National Testing Platform</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+
+  <!-- ================= TOP NAVIGATION BAR ================= -->
+  <header class="nta-header text-white shadow-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-amber-400 text-slate-900 font-extrabold text-base flex items-center justify-center shadow">
+          NTA
+        </div>
+        <div>
+          <a href="#/" class="text-base sm:text-lg font-bold tracking-tight hover:text-amber-200 transition">CBT Portal</a>
+          <p class="text-xs text-slate-200 hidden sm:block">National Computer Based Test Presenter & Exam Controller</p>
+        </div>
+      </div>
+
+      <!-- Auth Header Info (Hidden when logged out) -->
+      <div id="nav-user-info" class="hidden flex items-center gap-4">
+        <div class="text-right hidden sm:block">
+          <div id="nav-user-name" class="text-xs font-bold text-white">Student</div>
+          <div id="nav-user-role" class="text-[10px] text-amber-300 font-medium uppercase tracking-wider">Candidate</div>
+        </div>
+        <button id="btn-logout" class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold text-white border border-white/20 transition flex items-center gap-1.5">
+          <i class="fa-solid fa-right-from-bracket"></i>
+          <span>Logout</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Toast Notification System -->
+  <div id="toast-container" class="fixed top-16 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none"></div>
+
+  <!-- ================= MAIN ROUTER VIEWS ================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
+
+    <!-- 1. LOGIN VIEW -->
+    <div id="view-login" class="hidden max-w-md mx-auto my-8">
+      <div class="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+        <div class="nta-header px-6 py-5 text-white text-center">
+          <h2 class="text-xl font-bold">Portal Sign In</h2>
+          <p class="text-xs text-slate-200 mt-1">Access your Computer Based Test environment</p>
+        </div>
+        <form id="form-login" class="p-6 sm:p-8 space-y-5">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Email Address</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                <i class="fa-regular fa-envelope"></i>
+              </span>
+              <input type="email" id="login-email" required placeholder="yourname@gmail.com" class="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-sky-600 transition" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Password</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                <i class="fa-solid fa-lock"></i>
+              </span>
+              <input type="password" id="login-password" required placeholder="••••••••" class="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-sky-600 transition" />
+              <button type="button" id="toggle-login-pass" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
+            <i class="fa-solid fa-shield-halved mt-0.5 text-amber-600"></i>
+            <span><strong>Device Protection:</strong> Only one active device session is permitted per candidate. A new login automatically ends any existing session.</span>
+          </div>
+
+          <button type="submit" id="btn-submit-login" class="w-full py-3 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm shadow transition flex items-center justify-center gap-2">
+            <span>Sign In to Examination Portal</span>
+            <i class="fa-solid fa-arrow-right"></i>
+          </button>
+
+          <div class="text-center pt-2 border-t border-slate-100 text-xs text-slate-500">
+            Don't have an account? 
+            <a href="#/register" class="text-sky-600 font-semibold hover:underline">Create Student Account</a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 2. REGISTER VIEW -->
+    <div id="view-register" class="hidden max-w-md mx-auto my-8">
+      <div class="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+        <div class="nta-header px-6 py-5 text-white text-center">
+          <h2 class="text-xl font-bold">Student Registration</h2>
+          <p class="text-xs text-slate-200 mt-1">Enroll to take Computer Based Tests</p>
+        </div>
+        <form id="form-register" class="p-6 sm:p-8 space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Candidate Full Name</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                <i class="fa-regular fa-user"></i>
+              </span>
+              <input type="text" id="reg-name" required placeholder="e.g. Rahul Sharma" class="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-sky-600 transition" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Real Gmail / Email</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                <i class="fa-regular fa-envelope"></i>
+              </span>
+              <input type="email" id="reg-email" required placeholder="yourname@gmail.com" class="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-sky-600 transition" />
+            </div>
+            <p class="text-[11px] text-slate-500 mt-1">Your registered email will identify your exam attempts.</p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Choose Password</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                <i class="fa-solid fa-lock"></i>
+              </span>
+              <input type="password" id="reg-password" required minlength="6" placeholder="At least 6 characters" class="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-sky-600 transition" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Confirm Password</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                <i class="fa-solid fa-check-double"></i>
+              </span>
+              <input type="password" id="reg-confirm-password" required minlength="6" placeholder="Repeat your password" class="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-sky-600 transition" />
+            </div>
+          </div>
+
+          <button type="submit" id="btn-submit-register" class="w-full py-3 mt-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow transition flex items-center justify-center gap-2">
+            <span>Register & Continue</span>
+            <i class="fa-solid fa-user-plus"></i>
+          </button>
+
+          <div class="text-center pt-2 border-t border-slate-100 text-xs text-slate-500">
+            Already registered? 
+            <a href="#/login" class="text-sky-600 font-semibold hover:underline">Log in here</a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 3. STUDENT DASHBOARD VIEW -->
+    <div id="view-student" class="hidden space-y-6">
+      <div class="bg-gradient-to-r from-slate-900 to-sky-950 rounded-2xl p-6 text-white shadow-sm flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <span class="text-xs font-bold px-2.5 py-1 rounded bg-sky-500/20 text-sky-300 border border-sky-400/30">CANDIDATE PORTAL</span>
+          <h2 class="text-2xl font-bold mt-2" id="student-welcome-name">Welcome</h2>
+          <p class="text-xs sm:text-sm text-slate-300 mt-1">Select an active CBT paper below to begin your computer-based test session.</p>
+        </div>
+        <div class="bg-white/10 border border-white/20 rounded-xl p-4 text-xs space-y-1">
+          <div><i class="fa-solid fa-laptop text-sky-400 mr-1.5"></i> <span id="student-device-info">Device verified</span></div>
+          <div><i class="fa-solid fa-shield-check text-emerald-400 mr-1.5"></i> <span>Single session protected</span></div>
+        </div>
+      </div>
+
+      <!-- Test Catalog Section -->
+      <div>
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-bold text-slate-900">Available CBT Papers</h3>
+          <button id="btn-refresh-tests" class="text-xs text-sky-600 hover:text-sky-700 font-semibold flex items-center gap-1">
+            <i class="fa-solid fa-rotate-right"></i> Refresh
+          </button>
+        </div>
+        <div id="student-tests-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. ADMIN DASHBOARD VIEW -->
+    <div id="view-admin" class="hidden space-y-6">
+      <!-- Admin Top Banner -->
+      <div class="bg-slate-900 text-white rounded-2xl p-6 shadow-sm flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold px-2.5 py-0.5 rounded bg-amber-500 text-slate-900">ADMIN CONTROL ROOM</span>
+            <span class="text-xs text-slate-400">&bull; Live Management Console</span>
+          </div>
+          <h2 class="text-2xl font-bold mt-1">Examination Administrator</h2>
+          <p class="text-xs sm:text-sm text-slate-300">Oversee live candidate sessions, upload Gemini CBT HTML papers, and analyze student results.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-admin-export-csv" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition flex items-center gap-2">
+            <i class="fa-solid fa-file-csv"></i>
+            <span>Export CSV</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- KPI Summary Cards -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider">Live Active Devices</div>
+          <div class="flex items-center justify-between mt-2">
+            <span id="stat-active-sessions" class="text-3xl font-extrabold text-emerald-600">0</span>
+            <span class="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg">
+              <i class="fa-solid fa-signal"></i>
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-1">Single-session verified</p>
+        </div>
+
+        <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Candidates</div>
+          <div class="flex items-center justify-between mt-2">
+            <span id="stat-total-students" class="text-3xl font-extrabold text-sky-700">0</span>
+            <span class="w-10 h-10 rounded-lg bg-sky-50 text-sky-700 flex items-center justify-center text-lg">
+              <i class="fa-solid fa-users"></i>
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-1">Enrolled accounts</p>
+        </div>
+
+        <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider">Published CBT Papers</div>
+          <div class="flex items-center justify-between mt-2">
+            <span id="stat-total-tests" class="text-3xl font-extrabold text-indigo-700">0</span>
+            <span class="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center text-lg">
+              <i class="fa-solid fa-file-lines"></i>
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-1">Active examination files</p>
+        </div>
+
+        <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+          <div class="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Submissions</div>
+          <div class="flex items-center justify-between mt-2">
+            <span id="stat-total-submissions" class="text-3xl font-extrabold text-purple-700">0</span>
+            <span class="w-10 h-10 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center text-lg">
+              <i class="fa-solid fa-clipboard-check"></i>
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-1">Completed attempts recorded</p>
+        </div>
+      </div>
+
+      <!-- Admin Tabs Navigation -->
+      <div class="border-b border-slate-200 flex items-center gap-2 overflow-x-auto">
+        <button class="admin-tab-btn active px-4 py-2.5 font-bold text-xs sm:text-sm text-sky-600 border-b-2 border-sky-600 whitespace-nowrap" data-target="admin-tab-sessions">
+          <i class="fa-solid fa-display mr-1.5"></i> Live Active Devices & Sessions
+        </button>
+        <button class="admin-tab-btn px-4 py-2.5 font-bold text-xs sm:text-sm text-slate-600 hover:text-slate-900 border-b-2 border-transparent whitespace-nowrap" data-target="admin-tab-upload">
+          <i class="fa-solid fa-cloud-arrow-up mr-1.5"></i> Upload CBT HTML Paper
+        </button>
+        <button class="admin-tab-btn px-4 py-2.5 font-bold text-xs sm:text-sm text-slate-600 hover:text-slate-900 border-b-2 border-transparent whitespace-nowrap" data-target="admin-tab-results">
+          <i class="fa-solid fa-square-poll-vertical mr-1.5"></i> Candidate Exam Results
+        </button>
+        <button class="admin-tab-btn px-4 py-2.5 font-bold text-xs sm:text-sm text-slate-600 hover:text-slate-900 border-b-2 border-transparent whitespace-nowrap" data-target="admin-tab-tests">
+          <i class="fa-solid fa-layer-group mr-1.5"></i> Manage Published Papers
+        </button>
+      </div>
+
+      <!-- TAB 1: LIVE DEVICE MONITOR -->
+      <div id="admin-tab-sessions" class="admin-tab-content space-y-4">
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="font-bold text-sm text-slate-800">Connected Candidate Devices</h3>
+              <p class="text-xs text-slate-500">Live monitoring of client OS, browser, IP address, resolution & heartbeat</p>
+            </div>
+            <button id="btn-refresh-sessions" class="text-xs bg-white border border-slate-300 hover:bg-slate-50 px-3 py-1.5 rounded-lg font-semibold text-slate-700 shadow-sm flex items-center gap-1.5">
+              <i class="fa-solid fa-arrows-rotate"></i>
+              <span>Refresh Now</span>
+            </button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs text-left">
+              <thead class="bg-slate-100 text-slate-600 uppercase tracking-wider font-bold">
+                <tr>
+                  <th class="py-3 px-4">Candidate</th>
+                  <th class="py-3 px-4">Status</th>
+                  <th class="py-3 px-4">Operating System</th>
+                  <th class="py-3 px-4">Browser</th>
+                  <th class="py-3 px-4">Screen Size</th>
+                  <th class="py-3 px-4">IP Address</th>
+                  <th class="py-3 px-4">Login Time</th>
+                  <th class="py-3 px-4 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="table-sessions-body" class="divide-y divide-slate-200">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: UPLOAD CBT PAPER -->
+      <div id="admin-tab-upload" class="admin-tab-content hidden space-y-4">
+        <div class="max-w-2xl bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-5">
+          <div>
+            <h3 class="font-bold text-base text-slate-900">Upload New CBT Exam File</h3>
+            <p class="text-xs text-slate-500 mt-0.5">Upload any Gemini-generated CBT file or custom JEE/mock HTML. The platform automatically parses questions, subjects, and integrates the single-session engine.</p>
+          </div>
+
+          <form id="form-upload-test" class="space-y-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Select CBT HTML File (.html)</label>
+              <div id="drop-zone" class="border-2 border-dashed border-slate-300 hover:border-sky-500 rounded-xl p-8 text-center cursor-pointer transition bg-slate-50">
+                <i class="fa-solid fa-file-code text-4xl text-slate-400 mb-2"></i>
+                <div class="text-sm font-semibold text-slate-700" id="file-name-display">Click or drag & drop CBT HTML here</div>
+                <p class="text-xs text-slate-400 mt-1">Supports full JEE Mains mock papers & minor tests up to 50MB</p>
+                <input type="file" id="upload-file" accept=".html" class="hidden" required />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Test Title (Optional Override)</label>
+                <input type="text" id="upload-title" placeholder="Auto-detected from file" class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-sky-600" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Duration (Minutes)</label>
+                <input type="number" id="upload-duration" placeholder="180 (3 Hours)" min="1" class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-sky-600" />
+              </div>
+            </div>
+
+            <div class="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-2">
+              <label class="text-xs font-bold text-slate-800 uppercase tracking-wider block">Candidate Result Visibility</label>
+              <div class="flex items-center gap-4">
+                <label class="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                  <input type="radio" name="hideResults" value="1" checked class="accent-sky-600" />
+                  <span>Admin Only (Scores Hidden from Students)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                  <input type="radio" name="hideResults" value="0" class="accent-sky-600" />
+                  <span>Show Full Analysis to Students</span>
+                </label>
+              </div>
+              <p class="text-[11px] text-slate-500">When set to "Admin Only", candidates only receive an exam completion confirmation; results remain confidential in Admin console.</p>
+            </div>
+
+            <button type="submit" id="btn-submit-upload" class="w-full py-3 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm shadow transition flex items-center justify-center gap-2">
+              <i class="fa-solid fa-cloud-arrow-up"></i>
+              <span>Publish CBT Paper</span>
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- TAB 3: EXAM RESULTS -->
+      <div id="admin-tab-results" class="admin-tab-content hidden space-y-4">
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="font-bold text-sm text-slate-800">Candidate Examination Submissions</h3>
+              <p class="text-xs text-slate-500">Official scores, accuracy metrics, time consumed and test device information</p>
+            </div>
+            <button id="btn-refresh-results" class="text-xs bg-white border border-slate-300 hover:bg-slate-50 px-3 py-1.5 rounded-lg font-semibold text-slate-700 shadow-sm flex items-center gap-1.5">
+              <i class="fa-solid fa-arrows-rotate"></i>
+              <span>Refresh Results</span>
+            </button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs text-left">
+              <thead class="bg-slate-100 text-slate-600 uppercase tracking-wider font-bold">
+                <tr>
+                  <th class="py-3 px-4">Candidate</th>
+                  <th class="py-3 px-4">Test Title</th>
+                  <th class="py-3 px-4 text-center">Score</th>
+                  <th class="py-3 px-4 text-center">Accuracy</th>
+                  <th class="py-3 px-4 text-center">Time</th>
+                  <th class="py-3 px-4">Device Used</th>
+                  <th class="py-3 px-4">Submitted At</th>
+                  <th class="py-3 px-4 text-right">Details</th>
+                </tr>
+              </thead>
+              <tbody id="table-results-body" class="divide-y divide-slate-200">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 4: MANAGE PAPERS -->
+      <div id="admin-tab-tests" class="admin-tab-content hidden space-y-4">
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="font-bold text-sm text-slate-800">Published CBT Papers</h3>
+              <p class="text-xs text-slate-500">Manage uploaded papers, question parameters and candidate permissions</p>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs text-left">
+              <thead class="bg-slate-100 text-slate-600 uppercase tracking-wider font-bold">
+                <tr>
+                  <th class="py-3 px-4">Test Code</th>
+                  <th class="py-3 px-4">Title</th>
+                  <th class="py-3 px-4 text-center">Questions</th>
+                  <th class="py-3 px-4 text-center">Duration</th>
+                  <th class="py-3 px-4 text-center">Attempts</th>
+                  <th class="py-3 px-4 text-center">Results Policy</th>
+                  <th class="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="table-tests-body" class="divide-y divide-slate-200">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ================= SUBMISSION DETAIL MODAL ================= -->
+  <div id="modal-result-detail" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
+      <div class="nta-header text-white px-6 py-4 flex items-center justify-between">
+        <div>
+          <h3 class="font-bold text-base" id="modal-sub-candidate">Candidate Answer Breakdown</h3>
+          <p class="text-xs text-slate-300" id="modal-sub-test">Official CBT Scorecard</p>
+        </div>
+        <button id="btn-close-result-modal" class="text-slate-300 hover:text-white text-xl leading-none">&times;</button>
+      </div>
+      <div class="p-6 overflow-y-auto space-y-4">
+        <!-- Quick KPIs -->
+        <div class="grid grid-cols-4 gap-2 text-center text-xs">
+          <div class="bg-slate-50 border border-slate-200 p-2.5 rounded-lg">
+            <div class="text-slate-500 uppercase font-semibold text-[10px]">Total Score</div>
+            <div class="font-extrabold text-base text-slate-900 mt-0.5" id="modal-kpi-score">0 / 300</div>
+          </div>
+          <div class="bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg">
+            <div class="text-emerald-700 uppercase font-semibold text-[10px]">Correct</div>
+            <div class="font-extrabold text-base text-emerald-700 mt-0.5" id="modal-kpi-correct">0</div>
+          </div>
+          <div class="bg-red-50 border border-red-200 p-2.5 rounded-lg">
+            <div class="text-red-600 uppercase font-semibold text-[10px]">Incorrect</div>
+            <div class="font-extrabold text-base text-red-600 mt-0.5" id="modal-kpi-incorrect">0</div>
+          </div>
+          <div class="bg-sky-50 border border-sky-200 p-2.5 rounded-lg">
+            <div class="text-sky-700 uppercase font-semibold text-[10px]">Accuracy</div>
+            <div class="font-extrabold text-base text-sky-700 mt-0.5" id="modal-kpi-accuracy">0%</div>
+          </div>
+        </div>
+
+        <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1">
+          <div><strong class="text-slate-700">Exam Device:</strong> <span id="modal-device-text" class="text-slate-600">--</span></div>
+          <div><strong class="text-slate-700">Client IP:</strong> <span id="modal-ip-text" class="font-mono text-slate-600">--</span></div>
+          <div><strong class="text-slate-700">Time Taken:</strong> <span id="modal-time-text" class="text-slate-600">--</span></div>
+        </div>
+
+        <div>
+          <h4 class="font-bold text-xs uppercase tracking-wider text-slate-700 mb-2">Question-by-Question Response Audit</h4>
+          <div id="modal-answers-list" class="max-h-60 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-200 text-xs">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+      <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 text-right">
+        <button id="btn-dismiss-modal" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold rounded-lg transition">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/js/app.js"></script>
+  <script src="/js/auth.js"></script>
+  <script src="/js/student.js"></script>
+  <script src="/js/admin.js"></script>
+</body>
+</html>

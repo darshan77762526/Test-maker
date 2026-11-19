@@ -1,0 +1,66 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const { initDatabase } = require('./db');
+
+const app = express();
+const PORT = process.env.PORT || 4000;
+
+// Enable CORS for frontend deployment flexibility
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-screen-size']
+}));
+
+// Body parsers with generous limits for question payloads
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Health Check
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    service: 'CBT Presenter Platform API'
+  });
+});
+
+// API Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/sessions', require('./routes/sessions'));
+app.use('/api/tests', require('./routes/tests'));
+app.use('/api/admin', require('./routes/admin'));
+
+// Static Client Application
+const clientPath = path.join(__dirname, '..', 'client');
+app.use(express.static(clientPath));
+
+// SPA Fallback: All unmatched non-API routes serve index.html
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'Endpoint not found' });
+  }
+  res.sendFile(path.join(clientPath, 'index.html'));
+});
+
+// Start Server and Initialize Database
+async function bootstrap() {
+  try {
+    await initDatabase();
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`====================================================`);
+      console.log(`  CBT PRESENTER & EXAM PLATFORM`);
+      console.log(`  Server running on http://localhost:${PORT}`);
+      console.log(`  Default Admin: ${process.env.ADMIN_EMAIL || 'admin@cbtportal.com'}`);
+      console.log(`  Admin Password: ${process.env.ADMIN_PASSWORD || 'Admin@123'}`);
+      console.log(`====================================================`);
+    });
+  } catch (err) {
+    console.error('Fatal initialization error:', err);
+    process.exit(1);
+  }
+}
+
+bootstrap();
