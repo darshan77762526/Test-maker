@@ -122,19 +122,26 @@ async function initDatabase() {
 
   await query.exec(schema);
 
-  // Seed default admin if not existing
-  const adminEmail = (process.env.ADMIN_EMAIL || 'admin@cbtportal.com').toLowerCase().trim();
-  const existingAdmin = await query.get('SELECT * FROM users WHERE email = ?', [adminEmail]);
+  // Seed administrator if configured in environment
+  const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.toLowerCase().trim() : null;
+  const rawPass = process.env.ADMIN_PASSWORD;
 
-  if (!existingAdmin) {
-    const rawPass = process.env.ADMIN_PASSWORD || 'Admin@123';
-    const passHash = await bcrypt.hash(rawPass, 10);
-    const adminName = process.env.ADMIN_NAME || 'Exam Administrator';
-    await query.run(
-      'INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
-      [adminName, adminEmail, passHash, 'ADMIN']
-    );
-    console.log(`[DB] Created default administrator: ${adminEmail} (password: ${rawPass})`);
+  if (adminEmail && rawPass) {
+    const existingAdmin = await query.get('SELECT * FROM users WHERE email = ?', [adminEmail]);
+    if (!existingAdmin) {
+      const passHash = await bcrypt.hash(rawPass, 10);
+      const adminName = process.env.ADMIN_NAME || 'Exam Administrator';
+      await query.run(
+        'INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
+        [adminName, adminEmail, passHash, 'ADMIN']
+      );
+      console.log(`[DB] Created administrator account from environment: ${adminEmail}`);
+    }
+  } else {
+    const anyAdmin = await query.get("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1");
+    if (!anyAdmin) {
+      console.log('[DB] Notice: Set ADMIN_EMAIL and ADMIN_PASSWORD in environment to initialize your admin account.');
+    }
   }
 
   // Pre-seed sample test if available

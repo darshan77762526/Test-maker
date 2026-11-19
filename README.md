@@ -56,13 +56,16 @@ Open your browser at `http://localhost:4000`.
 
 ---
 
-## 🔑 Default Administrator Credentials
+## 🔑 Administrator Setup
 
-| Role | Email | Password |
-|---|---|---|
-| **Administrator** | `admin@cbtportal.com` | `Admin@123` |
+Set your administrator credentials securely in your `.env` file or hosting environment variables:
 
-*(You can customize these credentials in your `.env` file before launching)*
+```env
+ADMIN_EMAIL=your_admin_email@example.com
+ADMIN_PASSWORD=your_secure_password
+```
+
+When the server starts, it will automatically register this administrator account if it does not already exist.
 
 ---
 
@@ -131,7 +134,7 @@ Test-maker/
 
 ## 📝 How to Publish Tests as Admin
 
-1. Sign in with `admin@cbtportal.com` / `Admin@123`.
+1. Sign in with your configured administrator email and password.
 2. Go to the **Upload CBT HTML Paper** tab.
 3. Drag & drop your Gemini `.html` file.
 4. Choose whether results are **Admin Only** (default) or **Visible to Students**.

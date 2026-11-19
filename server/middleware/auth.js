@@ -1,7 +1,9 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { query } = require('../db');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'cbt_portal_super_secret_jwt_key_2026_x99a!';
+// Secure secret from environment, or generate dynamic secret per server process
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
 async function authenticate(req, res, next) {
   try {

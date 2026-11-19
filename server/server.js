@@ -53,8 +53,11 @@ async function bootstrap() {
       console.log(`====================================================`);
       console.log(`  CBT PRESENTER & EXAM PLATFORM`);
       console.log(`  Server running on http://localhost:${PORT}`);
-      console.log(`  Default Admin: ${process.env.ADMIN_EMAIL || 'admin@cbtportal.com'}`);
-      console.log(`  Admin Password: ${process.env.ADMIN_PASSWORD || 'Admin@123'}`);
+      if (process.env.ADMIN_EMAIL) {
+        console.log(`  Admin Email configured: ${process.env.ADMIN_EMAIL}`);
+      } else {
+        console.log(`  Admin setup: Set ADMIN_EMAIL and ADMIN_PASSWORD in .env`);
+      }
       console.log(`====================================================`);
     });
   } catch (err) {
