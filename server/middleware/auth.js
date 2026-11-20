@@ -90,6 +90,11 @@ function renderTerminationPage(reason = 'terminated_by_admin') {
 </html>`;
 }
 
+function isApiRequest(req) {
+  const fullUrl = req.originalUrl || req.url || '';
+  return fullUrl.startsWith('/api/') || Boolean(req.xhr) || Boolean(req.headers['accept']?.includes('application/json'));
+}
+
 async function authenticate(req, res, next) {
   try {
     let token = null;
@@ -101,7 +106,7 @@ async function authenticate(req, res, next) {
     }
 
     if (!token) {
-      if (req.accepts('html') && !req.path.startsWith('/api/')) {
+      if (!isApiRequest(req) && req.accepts('html')) {
         return res.status(401).send(renderTerminationPage('no_token'));
       }
       return res.status(401).json({ error: 'UNAUTHORIZED', message: 'No authorization token provided' });
@@ -111,7 +116,7 @@ async function authenticate(req, res, next) {
     try {
       decoded = jwt.verify(token, JWT_SECRET);
     } catch (err) {
-      if (req.accepts('html') && !req.path.startsWith('/api/')) {
+      if (!isApiRequest(req) && req.accepts('html')) {
         return res.status(401).send(renderTerminationPage('token_expired'));
       }
       return res.status(401).json({ error: 'INVALID_TOKEN', message: 'Session token expired or invalid' });
@@ -129,7 +134,7 @@ async function authenticate(req, res, next) {
       // Mark terminated in SQLite if present
       query.run('UPDATE sessions SET is_active = 0, terminated_reason = ? WHERE token = ?', [fbSession.terminated_reason || 'terminated_by_admin', token]).catch(() => {});
 
-      if (req.accepts('html') && (req.path.includes('/run') || !req.path.startsWith('/api/'))) {
+      if (!isApiRequest(req) && req.accepts('html')) {
         return res.status(401).send(renderTerminationPage(fbSession.terminated_reason || 'terminated_by_admin'));
       }
       return res.status(401).json({
@@ -150,7 +155,7 @@ async function authenticate(req, res, next) {
 
     // If session is explicitly marked inactive in SQLite, block immediately
     if (session && session.is_active !== 1) {
-      if (req.accepts('html') && (req.path.includes('/run') || !req.path.startsWith('/api/'))) {
+      if (!isApiRequest(req) && req.accepts('html')) {
         return res.status(401).send(renderTerminationPage(session.terminated_reason || 'terminated_by_admin'));
       }
       return res.status(401).json({

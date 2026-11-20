@@ -61,7 +61,7 @@ window.App = {
 
   startHeartbeat() {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    this.heartbeatTimer = setInterval(async () => {
+    const checkPing = async () => {
       if (!this.token) return;
       try {
         const res = await fetch('/api/sessions/ping', {
@@ -76,12 +76,16 @@ window.App = {
         if (!res.ok || data.error === 'SESSION_TERMINATED') {
           clearInterval(this.heartbeatTimer);
           this.showSessionTerminated(
-            data.message || 'Your examination session was terminated by the Administrator.',
+            data.message || 'Your examination session has been terminated by the Administrator.',
             data.reason || 'terminated_by_admin'
           );
         }
       } catch (e) {}
-    }, 12000);
+    };
+
+    // Run check immediately and every 3 seconds for real-time responsiveness
+    checkPing();
+    this.heartbeatTimer = setInterval(checkPing, 3000);
   },
 
   showSessionTerminated(message, reason) {
@@ -96,8 +100,8 @@ window.App = {
       if (titleEl) titleEl.innerText = 'Multiple Device Login Detected';
       if (msgEl) msgEl.innerText = 'Your candidate account was logged in from another device. For examination security, only one device session can be active at a time.';
     } else {
-      if (titleEl) titleEl.innerText = 'Active Session Revoked';
-      if (msgEl) msgEl.innerText = message || 'Your examination session was forcefully terminated by the Administrator. Access to testing operations has been revoked.';
+      if (titleEl) titleEl.innerText = 'Session Terminated';
+      if (msgEl) msgEl.innerText = message || 'Your examination session has been terminated by the Administrator.';
     }
 
     modal.classList.remove('hidden');
@@ -114,7 +118,7 @@ window.App = {
     if (modal) modal.classList.add('hidden');
 
     window.location.hash = '#/login';
-    this.toast('Session ended. Please sign in again.', 'info');
+    this.toast('Session terminated. You have been logged out.', 'info');
   },
 
   async logout() {

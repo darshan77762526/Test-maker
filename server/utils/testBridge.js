@@ -196,14 +196,15 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
 
 <div id="cbt-toast-sync">✓ Attempt Saved & Secured to Cloud Portal</div>
 
-<div id="cbt-bridge-overlay">
-  <div class="cbt-bridge-card">
-    <div class="cbt-bridge-badge" id="cbt-overlay-badge">SESSION TERMINATED</div>
-    <h2 style="font-size: 22px; font-weight: 800; margin-bottom: 12px;" id="cbt-overlay-title">Multiple Device Login Detected</h2>
-    <p style="font-size: 14px; color: #94a3b8; line-height: 1.6;" id="cbt-overlay-msg">
-      Your account was logged in from another device. For examination security, only one device session can be active at a time.
+<div id="cbt-bridge-overlay" onclick="localStorage.clear(); window.location.href='/#/login';" style="cursor:pointer;">
+  <div class="cbt-bridge-card" onclick="localStorage.clear(); window.location.href='/#/login';" style="border: 2px solid #ef4444; border-radius: 24px; padding: 40px 32px; box-shadow: 0 25px 60px rgba(239, 68, 68, 0.4); max-width: 520px; width: 90%; background: #0f172a; cursor: pointer;">
+    <div class="cbt-bridge-badge" id="cbt-overlay-badge" style="background: #ef4444; font-size: 12px; font-weight: 900; letter-spacing: 0.12em; padding: 8px 20px; border-radius: 9999px;">SESSION TERMINATED</div>
+    <h2 style="font-size: 28px; font-weight: 900; margin: 16px 0 12px 0; color: #ffffff;" id="cbt-overlay-title">Session Terminated</h2>
+    <p style="font-size: 15px; color: #cbd5e1; line-height: 1.6; margin-bottom: 24px;" id="cbt-overlay-msg">
+      Your examination session has been terminated by the Administrator.
     </p>
-    <button class="cbt-bridge-btn" onclick="localStorage.clear(); window.location.href='/#/login';">Return to Login</button>
+    <button class="cbt-bridge-btn" style="background: #ef4444; width: 100%; padding: 15px; font-size: 16px; font-weight: 900; border-radius: 14px; cursor: pointer; border: none; color: #ffffff; box-shadow: 0 10px 25px rgba(239, 68, 68, 0.5);" onclick="localStorage.clear(); window.location.href='/#/login';">OK</button>
+    <div style="font-size: 12px; color: #64748b; margin-top: 16px; font-weight: 600;">Tap OK or tap anywhere to log out</div>
   </div>
 </div>
 
@@ -242,9 +243,9 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
       if (!res.ok || data.error === 'SESSION_TERMINATED') {
         clearInterval(heartbeatTimer);
         showOverlay(
-          'Active Session Terminated',
-          data.message || 'You have logged in on another device or your session was revoked by Administrator.',
-          'SESSION EXPIRED'
+          'Session Terminated',
+          data.message || 'Your examination session has been terminated by the Administrator.',
+          'SESSION TERMINATED'
         );
         return;
       }
@@ -268,7 +269,9 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     }
   }
 
-  heartbeatTimer = setInterval(sendHeartbeat, 12000);
+  // Fast 3-second heartbeat for instant termination response
+  heartbeatTimer = setInterval(sendHeartbeat, 3000);
+  setTimeout(sendHeartbeat, 1000);
 
   // 2. Automated Proctoring Webcam Capture (Feature 2)
   async function initProctoring() {

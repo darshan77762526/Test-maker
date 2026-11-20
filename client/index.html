@@ -603,19 +603,25 @@
     </div>
   </div>
 
-  <!-- ================= SESSION TERMINATED OVERLAY MODAL ================= -->
-  <div id="modal-session-terminated" class="hidden fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-8 text-center text-white shadow-2xl space-y-4">
-      <div class="inline-block px-3 py-1 bg-red-600 text-white font-extrabold text-xs tracking-wider rounded-full">
-        SESSION TERMINATED
+  <!-- ================= BIG SESSION TERMINATED OVERLAY BANNER ================= -->
+  <div id="modal-session-terminated" onclick="App.handleTerminatedAcknowledge()" class="hidden fixed inset-0 z-[99999] bg-slate-950/95 backdrop-blur-lg flex items-center justify-center p-4 cursor-pointer select-none">
+    <div onclick="App.handleTerminatedAcknowledge()" class="bg-gradient-to-b from-slate-900 to-slate-950 border-2 border-red-500/80 rounded-3xl max-w-lg w-full p-8 sm:p-10 text-center text-white shadow-2xl shadow-red-950/80 space-y-6 cursor-pointer">
+      <div class="inline-flex items-center gap-2 px-5 py-2 bg-red-600 text-white font-black text-xs tracking-widest rounded-full uppercase shadow-lg shadow-red-600/40">
+        <i class="fa-solid fa-triangle-exclamation text-sm"></i>
+        <span>SESSION TERMINATED</span>
       </div>
-      <h2 class="text-xl font-bold text-white" id="term-modal-title">Active Session Revoked</h2>
-      <p class="text-xs sm:text-sm text-slate-300 leading-relaxed" id="term-modal-msg">
-        Your examination session was terminated by the Administrator. Access to testing operations has been revoked.
+      <h2 class="text-3xl sm:text-4xl font-black text-white tracking-tight" id="term-modal-title">Session Terminated</h2>
+      <p class="text-sm sm:text-base text-slate-300 leading-relaxed font-medium" id="term-modal-msg">
+        Your examination session has been terminated by the Administrator. Access to active tests and testing operations has been revoked.
       </p>
-      <button onclick="App.handleTerminatedAcknowledge()" class="w-full py-3 bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm rounded-xl transition">
-        Return to Sign In
-      </button>
+      <div class="pt-2">
+        <button id="btn-term-ok" onclick="App.handleTerminatedAcknowledge()" class="w-full py-4 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-black text-lg rounded-2xl transition shadow-xl shadow-red-600/50 cursor-pointer">
+          OK
+        </button>
+      </div>
+      <div class="text-[11px] text-slate-500 font-semibold tracking-wide">
+        Tap OK or tap anywhere to return to the sign in page
+      </div>
     </div>
   </div>
 
