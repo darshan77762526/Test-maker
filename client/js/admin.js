@@ -1,6 +1,7 @@
 /**
  * Admin Console Controller:
- * Live Sessions, Device Auditing, Test Uploading, Results Analytics
+ * Live Sessions, Device Auditing, Test Uploading, Results Analytics,
+ * Proctoring Snapshots & Emergency Broadcast Errata Dispatcher
  */
 window.AdminModule = {
   activeSessionsInterval: null,
@@ -10,6 +11,7 @@ window.AdminModule = {
     this.bindUploadForm();
     this.bindModal();
     this.bindButtons();
+    this.bindBroadcast();
   },
 
   bindTabs() {
@@ -31,6 +33,7 @@ window.AdminModule = {
         if (target === 'admin-tab-sessions') this.loadSessions();
         if (target === 'admin-tab-results') this.loadResults();
         if (target === 'admin-tab-tests') this.loadTests();
+        if (target === 'admin-tab-broadcast') this.loadBroadcast();
       });
     });
   },
@@ -110,7 +113,13 @@ window.AdminModule = {
         formData.append('durationMinutes', document.getElementById('upload-duration').value.trim());
 
         const hideResultsRadio = document.querySelector('input[name="hideResults"]:checked');
-        formData.append('hideResultsStudent', hideResultsRadio ? hideResultsRadio.value : '1');
+        formData.append('hideResultsStudent', hideResultsRadio ? hideResultsRadio.value : '0');
+
+        // Window Scheduling (Feature 3)
+        const wStart = document.getElementById('upload-window-start')?.value;
+        const wEnd = document.getElementById('upload-window-end')?.value;
+        if (wStart) formData.append('windowStart', wStart);
+        if (wEnd) formData.append('windowEnd', wEnd);
 
         try {
           const res = await fetch('/api/admin/upload', {
@@ -126,7 +135,6 @@ window.AdminModule = {
           form.reset();
           fileNameDisplay.innerText = 'Click or drag & drop CBT HTML here';
 
-          // Refresh stats and navigate to tests tab
           this.loadStats();
           document.querySelector('[data-target="admin-tab-tests"]')?.click();
         } catch (err) {
@@ -137,6 +145,84 @@ window.AdminModule = {
         }
       });
     }
+  },
+
+  bindBroadcast() {
+    const bForm = document.getElementById('form-admin-broadcast');
+    const clearBtn = document.getElementById('btn-admin-clear-broadcast');
+
+    if (bForm) {
+      bForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('broadcast-message-input')?.value.trim();
+        const levelRadio = document.querySelector('input[name="broadcastLevel"]:checked');
+        const level = levelRadio ? levelRadio.value : 'urgent';
+
+        if (!msg) return;
+
+        const btn = document.getElementById('btn-submit-broadcast');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Dispatching...</span>';
+
+        try {
+          const res = await fetch('/api/admin/broadcast', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + App.token,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ message: msg, level })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error);
+
+          App.toast('Live emergency broadcast dispatched!', 'success');
+          bForm.reset();
+          this.loadBroadcast();
+        } catch (err) {
+          App.toast(err.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-bullhorn"></i><span>Dispatch Broadcast to All Active Screens</span>';
+        }
+      });
+    }
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/admin/broadcast', {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + App.token }
+          });
+          if (res.ok) {
+            App.toast('Active broadcast cleared.', 'info');
+            this.loadBroadcast();
+          }
+        } catch (e) {}
+      });
+    }
+  },
+
+  async loadBroadcast() {
+    try {
+      const res = await fetch('/api/admin/broadcast', {
+        headers: { 'Authorization': 'Bearer ' + App.token }
+      });
+      const data = await res.json();
+      const statusText = document.getElementById('admin-current-broadcast-text');
+      const clearBtn = document.getElementById('btn-admin-clear-broadcast');
+
+      if (data.broadcast && data.broadcast.active) {
+        if (statusText) {
+          statusText.innerHTML = `<span class="text-red-600 font-bold">● Active (${data.broadcast.level || 'urgent'}):</span> "${data.broadcast.message}" <span class="text-[10px] text-slate-400 font-normal">(${new Date(data.broadcast.updatedAt).toLocaleTimeString()})</span>`;
+        }
+        if (clearBtn) clearBtn.classList.remove('hidden');
+      } else {
+        if (statusText) statusText.innerText = 'No active broadcast dispatched.';
+        if (clearBtn) clearBtn.classList.add('hidden');
+      }
+    } catch (e) {}
   },
 
   async loadDashboard() {
@@ -349,6 +435,28 @@ window.AdminModule = {
         }).join('');
       }
 
+      // Render Proctoring Photos Gallery (Feature 2)
+      const proctorGallery = document.getElementById('modal-proctor-gallery');
+      const proctorCount = document.getElementById('modal-proctor-count');
+      const photos = sub.proctoringPhotos || [];
+
+      if (proctorCount) proctorCount.innerText = `${photos.length} frames captured`;
+      if (proctorGallery) {
+        if (photos.length === 0) {
+          proctorGallery.innerHTML = `<div class="col-span-full py-4 text-center text-slate-400 text-xs">No webcam proctoring frames recorded for this attempt.</div>`;
+        } else {
+          proctorGallery.innerHTML = photos.map(p => `
+            <div class="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm flex flex-col">
+              <img src="${p.photo}" alt="Proctor Frame" class="w-full h-24 object-cover cursor-pointer hover:opacity-90" onclick="window.open('${p.photo}', '_blank')" />
+              <div class="p-1.5 bg-slate-50 text-[10px] space-y-0.5">
+                <div class="font-bold text-slate-700 capitalize">${(p.trigger || 'snapshot').replace('_', ' ')}</div>
+                <div class="text-slate-400 font-mono">${new Date(p.timestamp).toLocaleTimeString()}</div>
+              </div>
+            </div>
+          `).join('');
+        }
+      }
+
       modal.classList.remove('hidden');
     } catch (err) {
       App.toast(err.message, 'error');
@@ -379,22 +487,31 @@ window.AdminModule = {
           `<button onclick="AdminModule.toggleResultsPolicy(${t.id}, false)" class="px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 font-bold text-[10px] hover:bg-red-100 transition" title="Click to allow students to see results">Admin Only</button>` :
           `<button onclick="AdminModule.toggleResultsPolicy(${t.id}, true)" class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[10px] hover:bg-emerald-100 transition" title="Click to hide results from students">Students Can View</button>`;
 
+        let windowBadge = '<span class="text-slate-400">Anytime</span>';
+        if (t.windowStart || t.windowEnd) {
+          const s = t.windowStart ? new Date(t.windowStart).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Open';
+          const e = t.windowEnd ? new Date(t.windowEnd).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'No deadline';
+          windowBadge = `<span class="font-mono text-[10px] text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">${s} → ${e}</span>`;
+        }
+
         return `
           <tr class="hover:bg-slate-50 transition">
-            <td class="py-3 px-4 font-mono font-bold text-slate-800 uppercase">${t.testCode}</td>
+            <td class="py-3 px-4 font-mono font-bold text-slate-700">${t.testCode}</td>
             <td class="py-3 px-4">
               <div class="font-bold text-slate-900">${t.title}</div>
-              <div class="text-[11px] text-slate-500">${t.subjects.join(', ')}</div>
+              <div class="text-[11px] text-slate-500">${windowBadge}</div>
             </td>
-            <td class="py-3 px-4 text-center font-bold text-slate-700">${t.totalQuestions}</td>
-            <td class="py-3 px-4 text-center text-slate-600">${t.durationMinutes}m</td>
-            <td class="py-3 px-4 text-center font-bold text-sky-700">${t.totalAttempts}</td>
+            <td class="py-3 px-4 text-center font-medium">${t.totalQuestions} Qs</td>
+            <td class="py-3 px-4 text-center font-medium">${t.durationMinutes}m</td>
+            <td class="py-3 px-4 text-center font-bold text-slate-700">${t.totalAttempts}</td>
             <td class="py-3 px-4 text-center">${policyBadge}</td>
-            <td class="py-3 px-4 text-right">
-              <div class="flex items-center justify-end gap-2">
-                <a href="/api/tests/${t.id}/run?token=${App.token}" target="_blank" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold transition">Preview</a>
-                <button onclick="AdminModule.deleteTest(${t.id})" class="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded text-[11px] font-bold transition">Delete</button>
-              </div>
+            <td class="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+              <a href="/api/tests/${t.id}/run?token=${App.token}" target="_blank" class="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 font-bold text-[11px] rounded transition">
+                Preview
+              </a>
+              <button onclick="AdminModule.deleteTest(${t.id})" class="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-[11px] rounded transition">
+                Delete
+              </button>
             </td>
           </tr>
         `;
@@ -415,28 +532,29 @@ window.AdminModule = {
         body: JSON.stringify({ hideResultsStudent: hideResults })
       });
       if (res.ok) {
-        App.toast('Test results policy updated', 'success');
+        App.toast('Results visibility policy updated', 'info');
         this.loadTests();
       }
-    } catch (e) {
-      App.toast('Error updating policy', 'error');
-    }
+    } catch (e) {}
   },
 
   async deleteTest(testId) {
-    if (!confirm('Are you sure you want to delete this CBT paper and all candidate attempts?')) return;
+    if (!confirm('Are you sure you want to permanently delete this test and its submissions?')) return;
     try {
       const res = await fetch(`/api/admin/tests/${testId}`, {
         method: 'DELETE',
         headers: { 'Authorization': 'Bearer ' + App.token }
       });
+      const data = await res.json();
       if (res.ok) {
-        App.toast('Test paper deleted', 'info');
+        App.toast('Test paper deleted successfully', 'success');
         this.loadTests();
         this.loadStats();
+      } else {
+        throw new Error(data.error);
       }
-    } catch (e) {
-      App.toast('Error deleting test', 'error');
+    } catch (err) {
+      App.toast(err.message, 'error');
     }
   }
 };

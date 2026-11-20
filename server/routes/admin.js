@@ -218,8 +218,7 @@ router.post('/sessions/:id/terminate', async (req, res) => {
 
 /**
  * POST /api/admin/upload
- * Admin uploads CBT HTML files (Gemini-generated, minor, major, or mock papers)
- * Persists to both SQLite and Firebase Realtime Database
+ * Admin uploads CBT HTML files with optional Window Scheduling (Feature 3)
  */
 router.post('/upload', upload.single('testFile'), async (req, res) => {
   try {
@@ -235,8 +234,9 @@ router.post('/upload', upload.single('testFile'), async (req, res) => {
 
     const title = req.body.title?.trim() || parsed.title;
     const durationMinutes = parseInt(req.body.durationMinutes, 10) || parsed.durationMinutes;
-    // Default to showing detailed analysis to students (0 = visible to students)
     const hideResults = req.body.hideResultsStudent === '1' || req.body.hideResultsStudent === true ? 1 : 0;
+    const windowStart = req.body.windowStart ? req.body.windowStart.trim() : null;
+    const windowEnd = req.body.windowEnd ? req.body.windowEnd.trim() : null;
 
     // Generate unique test code
     let testCode = req.body.testCode?.trim();
@@ -246,8 +246,8 @@ router.post('/upload', upload.single('testFile'), async (req, res) => {
 
     const result = await query.run(
       `INSERT INTO tests 
-       (test_code, title, description, file_name, duration_minutes, total_questions, subjects, hide_results_student)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (test_code, title, description, file_name, duration_minutes, total_questions, subjects, hide_results_student, window_start, window_end)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         testCode,
         title,
@@ -256,7 +256,9 @@ router.post('/upload', upload.single('testFile'), async (req, res) => {
         durationMinutes,
         parsed.totalQuestions,
         JSON.stringify(parsed.subjects),
-        hideResults
+        hideResults,
+        windowStart,
+        windowEnd
       ]
     );
 
@@ -275,11 +277,13 @@ router.post('/upload', upload.single('testFile'), async (req, res) => {
           total_questions: parsed.totalQuestions,
           subjects: parsed.subjects,
           hide_results_student: hideResults,
+          window_start: windowStart,
+          window_end: windowEnd,
           is_active: 1,
           created_at: new Date().toISOString(),
           html_content: fileContent
         });
-        console.log(`[Firebase] Successfully backed up test ${testCode} (ID: ${testId}) to Cloud RTDB`);
+        console.log(`[Firebase] Successfully backed up test ${testCode} with Window Schedule to Cloud RTDB`);
       } catch (fbErr) {
         console.error('[Firebase] Failed to backup test to cloud:', fbErr.message);
       }
@@ -294,7 +298,9 @@ router.post('/upload', upload.single('testFile'), async (req, res) => {
         durationMinutes,
         totalQuestions: parsed.totalQuestions,
         subjects: parsed.subjects,
-        hideResultsStudent: hideResults === 1
+        hideResultsStudent: hideResults === 1,
+        windowStart,
+        windowEnd
       }
     });
   } catch (error) {
@@ -328,18 +334,16 @@ router.get('/tests', async (req, res) => {
           for (const fbt of fbTests) {
             const exists = localTests.find(lt => String(lt.id) === String(fbt.id) || lt.test_code === fbt.test_code);
             if (!exists && fbt.is_active !== 0) {
-              // Ensure test file exists in uploads dir
               const fName = fbt.file_name || `test_${fbt.id}.html`;
               const fPath = path.join(uploadDir, fName);
               if (!fs.existsSync(fPath) && fbt.html_content) {
                 try { fs.writeFileSync(fPath, fbt.html_content, 'utf8'); } catch (e) {}
               }
 
-              // Recover into SQLite
               await query.run(
                 `INSERT OR REPLACE INTO tests 
-                 (id, test_code, title, description, file_name, duration_minutes, total_questions, subjects, hide_results_student, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+                 (id, test_code, title, description, file_name, duration_minutes, total_questions, subjects, hide_results_student, window_start, window_end, is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
                 [
                   fbt.id,
                   fbt.test_code,
@@ -349,7 +353,9 @@ router.get('/tests', async (req, res) => {
                   fbt.duration_minutes || 180,
                   fbt.total_questions || 75,
                   typeof fbt.subjects === 'string' ? fbt.subjects : JSON.stringify(fbt.subjects || []),
-                  fbt.hide_results_student ? 1 : 0
+                  fbt.hide_results_student ? 1 : 0,
+                  fbt.window_start || null,
+                  fbt.window_end || null
                 ]
               ).catch(() => {});
 
@@ -362,6 +368,8 @@ router.get('/tests', async (req, res) => {
                 total_questions: fbt.total_questions || 75,
                 subjects: fbt.subjects,
                 hide_results_student: fbt.hide_results_student ? 1 : 0,
+                window_start: fbt.window_start || null,
+                window_end: fbt.window_end || null,
                 is_active: 1,
                 total_attempts: 0,
                 avg_score: 0,
@@ -392,6 +400,8 @@ router.get('/tests', async (req, res) => {
         totalQuestions: t.total_questions,
         subjects,
         hideResultsStudent: t.hide_results_student === 1,
+        windowStart: t.window_start || null,
+        windowEnd: t.window_end || null,
         isActive: t.is_active === 1,
         totalAttempts: t.total_attempts || 0,
         avgScore: t.avg_score ? parseFloat(t.avg_score).toFixed(1) : 0,
@@ -407,12 +417,12 @@ router.get('/tests', async (req, res) => {
 
 /**
  * PATCH /api/admin/tests/:id
- * Toggle test settings (e.g. results visibility or active state)
+ * Toggle test settings (window scheduling, active state, title, duration)
  */
 router.patch('/tests/:id', async (req, res) => {
   try {
     const testId = req.params.id;
-    const { hideResultsStudent, isActive, title, durationMinutes } = req.body;
+    const { hideResultsStudent, isActive, title, durationMinutes, windowStart, windowEnd } = req.body;
 
     const updates = [];
     const params = [];
@@ -433,6 +443,14 @@ router.patch('/tests/:id', async (req, res) => {
       updates.push('duration_minutes = ?');
       params.push(parseInt(durationMinutes, 10));
     }
+    if (windowStart !== undefined) {
+      updates.push('window_start = ?');
+      params.push(windowStart ? windowStart.trim() : null);
+    }
+    if (windowEnd !== undefined) {
+      updates.push('window_end = ?');
+      params.push(windowEnd ? windowEnd.trim() : null);
+    }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
@@ -450,6 +468,8 @@ router.patch('/tests/:id', async (req, res) => {
           if (isActive !== undefined) fbUpdate['is_active'] = isActive ? 1 : 0;
           if (title) fbUpdate['title'] = title.trim();
           if (durationMinutes) fbUpdate['duration_minutes'] = parseInt(durationMinutes, 10);
+          if (windowStart !== undefined) fbUpdate['window_start'] = windowStart ? windowStart.trim() : null;
+          if (windowEnd !== undefined) fbUpdate['window_end'] = windowEnd ? windowEnd.trim() : null;
           await rtdb.ref(`cbt/tests/${testId}`).update(fbUpdate);
         }
       } catch (e) {}
@@ -474,7 +494,6 @@ router.delete('/tests/:id', async (req, res) => {
       return res.status(404).json({ error: 'Test not found' });
     }
 
-    // Try deleting file if exists
     try {
       const filePath = path.join(uploadDir, test.file_name);
       if (fs.existsSync(filePath)) {
@@ -485,7 +504,6 @@ router.delete('/tests/:id', async (req, res) => {
     await query.run('DELETE FROM submissions WHERE test_id = ?', [testId]);
     await query.run('DELETE FROM tests WHERE id = ?', [testId]);
 
-    // Track in deleted_tests to ensure auto-seeding NEVER revives it
     if (test.test_code) {
       await query.run('INSERT OR IGNORE INTO deleted_tests (test_code) VALUES (?)', [test.test_code]).catch(() => {});
       firebaseStore.deleteTest(testId, test.test_code).catch(() => {});
@@ -584,8 +602,7 @@ router.get('/results', async (req, res) => {
 
 /**
  * GET /api/admin/results/:submissionId
- * View single submission breakdown with responses
- * Falls back to Firebase RTDB if SQLite cold-started
+ * View single submission breakdown with responses AND Proctoring Photos (Feature 2)
  */
 router.get('/results/:submissionId', async (req, res) => {
   try {
@@ -610,9 +627,11 @@ router.get('/results/:submissionId', async (req, res) => {
       if (fbSub) {
         let answers = {};
         let device = {};
+        let proctoringPhotos = [];
         try {
           answers = typeof fbSub.answers_json === 'string' ? JSON.parse(fbSub.answers_json) : (fbSub.answers_json || {});
           device = typeof fbSub.device_info === 'string' ? JSON.parse(fbSub.device_info) : (fbSub.device_info || {});
+          proctoringPhotos = typeof fbSub.proctoring_photos === 'string' ? JSON.parse(fbSub.proctoring_photos) : (fbSub.proctoring_photos || []);
         } catch (e) {}
 
         return res.json({
@@ -631,7 +650,8 @@ router.get('/results/:submissionId', async (req, res) => {
             timeTakenSec: fbSub.time_taken_sec || 0,
             submittedAt: fbSub.submitted_at,
             device,
-            answers
+            answers,
+            proctoringPhotos
           }
         });
       }
@@ -643,9 +663,11 @@ router.get('/results/:submissionId', async (req, res) => {
 
     let answers = {};
     let device = {};
+    let proctoringPhotos = [];
     try {
       answers = JSON.parse(sub.answers_json || '{}');
       device = JSON.parse(sub.device_info || '{}');
+      proctoringPhotos = sub.proctoring_photos ? (typeof sub.proctoring_photos === 'string' ? JSON.parse(sub.proctoring_photos) : sub.proctoring_photos) : [];
     } catch (e) {}
 
     return res.json({
@@ -664,11 +686,53 @@ router.get('/results/:submissionId', async (req, res) => {
         timeTakenSec: sub.time_taken_sec,
         submittedAt: sub.submitted_at,
         device,
-        answers
+        answers,
+        proctoringPhotos
       }
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to retrieve submission details' });
+  }
+});
+
+/**
+ * Emergency Broadcast APIs (Feature 5)
+ */
+router.post('/broadcast', async (req, res) => {
+  try {
+    const { message, level = 'urgent' } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Broadcast message cannot be empty' });
+    }
+    if (firebaseStore.isAvailable()) {
+      await firebaseStore.setBroadcast({ message: message.trim(), level });
+    }
+    return res.json({ message: 'Live announcement dispatched to all candidate exam screens' });
+  } catch (e) {
+    return res.status(500).json({ error: 'Failed to dispatch broadcast' });
+  }
+});
+
+router.delete('/broadcast', async (req, res) => {
+  try {
+    if (firebaseStore.isAvailable()) {
+      await firebaseStore.clearBroadcast();
+    }
+    return res.json({ message: 'Active broadcast cleared' });
+  } catch (e) {
+    return res.status(500).json({ error: 'Failed to clear broadcast' });
+  }
+});
+
+router.get('/broadcast', async (req, res) => {
+  try {
+    let broadcast = null;
+    if (firebaseStore.isAvailable()) {
+      broadcast = await firebaseStore.getBroadcast();
+    }
+    return res.json({ broadcast });
+  } catch (e) {
+    return res.status(500).json({ error: 'Failed to retrieve broadcast' });
   }
 });
 

@@ -47,11 +47,33 @@ window.StudentModule = {
       deviceEl.innerText = `Resolution: ${window.screen.width}x${window.screen.height} • Browser Verified`;
     }
 
+    this.checkBroadcast();
     await this.loadCatalog();
     this.loadAttempts(true);
   },
 
+  async checkBroadcast() {
+    try {
+      const res = await App.apiFetch('/api/tests/broadcast');
+      const data = await res.json();
+      const banner = document.getElementById('student-broadcast-alert');
+      const msgEl = document.getElementById('student-broadcast-msg');
+      if (banner && data.broadcast && data.broadcast.active && data.broadcast.message) {
+        if (msgEl) msgEl.innerText = data.broadcast.message;
+        banner.classList.remove('hidden');
+        if (data.broadcast.level === 'urgent') {
+          banner.className = 'bg-red-600 text-white p-4 rounded-xl font-bold text-xs flex items-center justify-between shadow-md animate-pulse';
+        } else {
+          banner.className = 'bg-amber-500 text-slate-950 p-4 rounded-xl font-bold text-xs flex items-center justify-between shadow-md';
+        }
+      } else if (banner) {
+        banner.classList.add('hidden');
+      }
+    } catch (e) {}
+  },
+
   async loadCatalog() {
+    this.checkBroadcast();
     const container = document.getElementById('student-tests-grid');
     if (!container) return;
 
@@ -105,8 +127,39 @@ window.StudentModule = {
         `<span class="px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 text-[11px] font-semibold">${s}</span>`
       ).join(' ');
 
+      let windowBadge = '';
+      const isUpcoming = test.windowStatus === 'UPCOMING';
+      const isExpired = test.windowStatus === 'EXPIRED';
+
+      if (isUpcoming && test.windowStart) {
+        const d = new Date(test.windowStart);
+        windowBadge = `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold"><i class="fa-regular fa-clock mr-1"></i>Opens ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+      } else if (isExpired) {
+        windowBadge = `<span class="px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold"><i class="fa-solid fa-lock mr-1"></i>Window Closed</span>`;
+      } else if (test.windowEnd) {
+        const d = new Date(test.windowEnd);
+        windowBadge = `<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold"><i class="fa-solid fa-calendar-check mr-1"></i>Active until ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+      }
+
       let actionSection = '';
       if (test.hasSubmitted) {
+        let retakeBtn = '';
+        if (isExpired) {
+          retakeBtn = `
+            <button disabled class="py-2 bg-slate-200 text-slate-400 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm text-center cursor-not-allowed">
+              <i class="fa-solid fa-lock"></i>
+              <span>Closed</span>
+            </button>
+          `;
+        } else {
+          retakeBtn = `
+            <a href="/api/tests/${test.id}/run?token=${App.token}&retake=1" target="_blank" class="py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm text-center">
+              <i class="fa-solid fa-rotate-right"></i>
+              <span>Retake</span>
+            </a>
+          `;
+        }
+
         actionSection = `
           <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
             <div class="flex items-center justify-between">
@@ -118,20 +171,33 @@ window.StudentModule = {
                 <i class="fa-solid fa-square-poll-vertical"></i>
                 <span>Rewatch</span>
               </a>
-              <a href="/api/tests/${test.id}/run?token=${App.token}&retake=1" target="_blank" class="py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm text-center">
-                <i class="fa-solid fa-rotate-right"></i>
-                <span>Retake</span>
-              </a>
+              ${retakeBtn}
             </div>
           </div>
         `;
       } else {
-        actionSection = `
-          <a href="/api/tests/${test.id}/run?token=${App.token}" target="_blank" class="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2">
-            <span>Enter CBT Examination</span>
-            <i class="fa-solid fa-arrow-right"></i>
-          </a>
-        `;
+        if (isUpcoming) {
+          actionSection = `
+            <button disabled class="w-full py-2.5 bg-slate-100 text-slate-400 font-bold text-xs rounded-xl border border-slate-200 cursor-not-allowed flex items-center justify-center gap-2">
+              <i class="fa-solid fa-lock text-slate-400"></i>
+              <span>Exam Window Not Open</span>
+            </button>
+          `;
+        } else if (isExpired) {
+          actionSection = `
+            <button disabled class="w-full py-2.5 bg-slate-100 text-slate-400 font-bold text-xs rounded-xl border border-slate-200 cursor-not-allowed flex items-center justify-center gap-2">
+              <i class="fa-solid fa-ban text-slate-400"></i>
+              <span>Exam Window Closed</span>
+            </button>
+          `;
+        } else {
+          actionSection = `
+            <a href="/api/tests/${test.id}/run?token=${App.token}" target="_blank" class="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2">
+              <span>Enter CBT Examination</span>
+              <i class="fa-solid fa-arrow-right"></i>
+            </a>
+          `;
+        }
       }
 
       return `
@@ -139,7 +205,10 @@ window.StudentModule = {
           <div class="space-y-2">
             <div class="flex items-center justify-between gap-2">
               <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 uppercase">${test.testCode}</span>
-              <span class="text-[11px] text-slate-500 font-medium"><i class="fa-regular fa-clock mr-1 text-slate-400"></i>${test.durationMinutes} Mins (${durationHours}h)</span>
+              <div class="flex items-center gap-2">
+                ${windowBadge}
+                <span class="text-[11px] text-slate-500 font-medium"><i class="fa-regular fa-clock mr-1 text-slate-400"></i>${test.durationMinutes} Mins (${durationHours}h)</span>
+              </div>
             </div>
             <h4 class="font-bold text-base text-slate-900 leading-snug">${test.title}</h4>
             <p class="text-xs text-slate-500 line-clamp-2">${test.description || 'Official Computer Based Test'}</p>

@@ -23,14 +23,15 @@ function initFirebase() {
       } catch (e) {}
     }
 
-    if (!admin.apps.length) {
+    const apps = typeof admin.getApps === 'function' ? admin.getApps() : (admin.apps || []);
+    if (!apps.length) {
       const app = admin.initializeApp({
         credential: admin.cert(serviceAccount),
         databaseURL: "https://cbt-checker-default-rtdb.asia-southeast1.firebasedatabase.app"
       });
       db = getDatabase(app);
     } else {
-      db = getDatabase(admin.apps[0]);
+      db = getDatabase(apps[0]);
     }
 
     isInitialized = true;
@@ -92,7 +93,6 @@ const firebaseStore = {
       ...session,
       updatedAt: new Date().toISOString()
     });
-    // Also index by token key for O(1) lookup
     if (session.token) {
       await rtdb.ref(`cbt/sessions_by_token/${safeKey(session.token)}`).set({
         sessionId: session.id,
@@ -109,7 +109,6 @@ const firebaseStore = {
     if (!rtdb || !token) return null;
     try {
       const tKey = safeKey(token);
-      // Try fast index first
       const fastSnap = await rtdb.ref(`cbt/sessions_by_token/${tKey}`).once('value');
       if (fastSnap.exists()) {
         const fastVal = fastSnap.val();
@@ -118,7 +117,6 @@ const firebaseStore = {
           if (direct.exists()) return direct.val();
         }
       }
-      // Scan sessions
       const snap = await rtdb.ref('cbt/sessions').once('value');
       const val = snap.val();
       if (!val) return null;
@@ -205,7 +203,7 @@ const firebaseStore = {
     }
   },
 
-  // Tests (Cloud Test Catalog)
+  // Tests (Cloud Test Catalog & Window Scheduling)
   async saveTest(test) {
     const rtdb = initFirebase();
     if (!rtdb) return;
@@ -272,7 +270,7 @@ const firebaseStore = {
     }
   },
 
-  // Submissions (Persistent Exam Records)
+  // Submissions (Persistent Exam Records with Proctoring Photos)
   async saveSubmission(submission) {
     const rtdb = initFirebase();
     if (!rtdb) return;
@@ -329,6 +327,49 @@ const firebaseStore = {
         .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
     } catch (e) {
       return [];
+    }
+  },
+
+  // Live Emergency Broadcasts & Errata (Feature 5)
+  async setBroadcast({ message, level = 'urgent' }) {
+    const rtdb = initFirebase();
+    if (!rtdb) return;
+    try {
+      await rtdb.ref('cbt/broadcast').set({
+        message,
+        level,
+        active: true,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (e) {
+      console.error('[Firebase] setBroadcast error:', e.message);
+    }
+  },
+
+  async getBroadcast() {
+    const rtdb = initFirebase();
+    if (!rtdb) return null;
+    try {
+      const snap = await rtdb.ref('cbt/broadcast').once('value');
+      const val = snap.val();
+      if (val && val.active) return val;
+      return null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  async clearBroadcast() {
+    const rtdb = initFirebase();
+    if (!rtdb) return;
+    try {
+      await rtdb.ref('cbt/broadcast').set({
+        active: false,
+        message: '',
+        clearedAt: new Date().toISOString()
+      });
+    } catch (e) {
+      console.error('[Firebase] clearBroadcast error:', e.message);
     }
   }
 };

@@ -12,10 +12,100 @@ if (!fs.existsSync(uploadDir)) {
   try { fs.mkdirSync(uploadDir, { recursive: true }); } catch (e) {}
 }
 
+function renderWindowNotice(status, title, targetDate) {
+  const isUpcoming = status === 'UPCOMING';
+  const heading = isUpcoming ? 'Examination Window Not Open Yet' : 'Examination Window Has Closed';
+  const badge = isUpcoming ? 'UPCOMING EXAM' : 'WINDOW EXPIRED';
+  const message = isUpcoming 
+    ? `This examination is scheduled to unlock on <strong>${new Date(targetDate).toLocaleString()}</strong>. Candidate entry is strictly restricted prior to the scheduled window.`
+    : `The examination window for this paper concluded on <strong>${new Date(targetDate).toLocaleString()}</strong>. Late submissions or re-entries are locked as per examination regulations.`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${heading} — National Testing Platform</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      background: radial-gradient(ellipse at center, #1e293b 0%, #0f172a 100%);
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      max-width: 520px;
+      width: 100%;
+      background: rgba(30, 41, 59, 0.95);
+      border: 1px solid #334155;
+      border-radius: 20px;
+      padding: 36px 32px;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 16px;
+      background: ${isUpcoming ? '#0284c7' : '#ef4444'};
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      border-radius: 9999px;
+      margin-bottom: 20px;
+    }
+    h1 { font-size: 20px; font-weight: 800; margin-bottom: 12px; color: #ffffff; }
+    h2 { font-size: 15px; font-weight: 600; color: #38bdf8; margin-bottom: 16px; }
+    p { font-size: 13px; color: #94a3b8; line-height: 1.6; margin-bottom: 28px; }
+    .btn {
+      display: inline-block;
+      width: 100%;
+      padding: 13px 24px;
+      background: #0284c7;
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 14px;
+      border-radius: 10px;
+      text-decoration: none;
+      transition: background 0.15s ease;
+    }
+    .btn:hover { background: #0369a1; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">${badge}</div>
+    <h1>${heading}</h1>
+    <h2>${title}</h2>
+    <p>${message}</p>
+    <a href="/#/student" class="btn">Return to Candidate Dashboard</a>
+  </div>
+</body>
+</html>`;
+}
+
+/**
+ * GET /api/tests/broadcast
+ * Public / authenticated broadcast feed for candidate dashboard
+ */
+router.get('/broadcast', async (req, res) => {
+  let broadcast = null;
+  if (firebaseStore.isAvailable()) {
+    try {
+      broadcast = await firebaseStore.getBroadcast();
+    } catch (e) {}
+  }
+  return res.json({ broadcast });
+});
+
 /**
  * GET /api/tests
- * Returns available tests for students/admins with submission status
- * Automatically recovers tests from Firebase Cloud if SQLite is fresh/cold
+ * Returns available tests for students with attempt status & Window Scheduling (Feature 3)
  */
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -23,7 +113,7 @@ router.get('/', authenticate, async (req, res) => {
     try {
       tests = await query.all(
         `SELECT t.id, t.test_code, t.title, t.description, t.duration_minutes, 
-                t.total_questions, t.subjects, t.hide_results_student, t.created_at,
+                t.total_questions, t.subjects, t.hide_results_student, t.window_start, t.window_end, t.created_at,
                 s.id AS submission_id, s.total_score, s.submitted_at
          FROM tests t
          LEFT JOIN submissions s ON s.test_id = t.id AND s.user_id = ?
@@ -55,16 +145,22 @@ router.get('/', authenticate, async (req, res) => {
                 total_questions: fbt.total_questions || 75,
                 subjects: fbt.subjects,
                 hide_results_student: fbt.hide_results_student ? 1 : 0,
+                window_start: fbt.window_start || null,
+                window_end: fbt.window_end || null,
                 created_at: fbt.created_at || new Date().toISOString(),
                 submission_id: userSub ? userSub.id : null,
                 total_score: userSub ? userSub.total_score : null,
                 submitted_at: userSub ? userSub.submitted_at : null
               };
               tests.push(newTestObj);
-            } else if (!existing.submission_id && userSub) {
-              existing.submission_id = userSub.id;
-              existing.total_score = userSub.total_score;
-              existing.submitted_at = userSub.submitted_at;
+            } else {
+              if (fbt.window_start) existing.window_start = fbt.window_start;
+              if (fbt.window_end) existing.window_end = fbt.window_end;
+              if (!existing.submission_id && userSub) {
+                existing.submission_id = userSub.id;
+                existing.total_score = userSub.total_score;
+                existing.submitted_at = userSub.submitted_at;
+              }
             }
           }
         }
@@ -73,12 +169,22 @@ router.get('/', authenticate, async (req, res) => {
       }
     }
 
+    const now = new Date();
+
     const formatted = tests.map(t => {
       let subjectsList = [];
       try {
         subjectsList = typeof t.subjects === 'string' ? JSON.parse(t.subjects) : t.subjects;
       } catch (e) {
         subjectsList = [t.subjects];
+      }
+
+      // Compute scheduling window status
+      let windowStatus = 'ACTIVE';
+      if (t.window_start && new Date(t.window_start) > now) {
+        windowStatus = 'UPCOMING';
+      } else if (t.window_end && new Date(t.window_end) < now) {
+        windowStatus = 'EXPIRED';
       }
 
       return {
@@ -89,8 +195,11 @@ router.get('/', authenticate, async (req, res) => {
         durationMinutes: t.duration_minutes,
         totalQuestions: t.total_questions,
         subjects: subjectsList || [],
-        hideResultsStudent: false, // Students are always allowed to view their detailed scorecard
+        hideResultsStudent: false,
         createdAt: t.created_at,
+        windowStart: t.window_start || null,
+        windowEnd: t.window_end || null,
+        windowStatus,
         hasSubmitted: !!t.submission_id,
         submissionId: t.submission_id,
         userScore: t.total_score !== null && t.total_score !== undefined ? t.total_score : null,
@@ -107,8 +216,7 @@ router.get('/', authenticate, async (req, res) => {
 
 /**
  * GET /api/tests/:id/run
- * Serves the CBT HTML file injected with the platform security & sync bridge
- * Automatically downloads HTML from Firebase Cloud if absent on local ephemeral storage
+ * Serves the CBT HTML file with security, proctoring & scheduling window enforcement
  */
 router.get('/:id/run', authenticate, async (req, res) => {
   try {
@@ -123,10 +231,21 @@ router.get('/:id/run', authenticate, async (req, res) => {
       return res.status(404).send('<h3>Test not found or inactive.</h3>');
     }
 
+    // Window Scheduling Enforcement (Feature 3)
+    // Only check window for active attempts; rewatch mode is always accessible
+    const isRetake = req.query.retake === '1' || req.query.retake === 'true';
+    const now = new Date();
+
+    if (test.window_start && new Date(test.window_start) > now) {
+      return res.status(403).send(renderWindowNotice('UPCOMING', test.title, test.window_start));
+    }
+    if (test.window_end && new Date(test.window_end) < now && isRetake) {
+      return res.status(403).send(renderWindowNotice('EXPIRED', test.title, test.window_end));
+    }
+
     const fileName = test.file_name || `test_${test.id}.html`;
     const filePath = path.join(uploadDir, fileName);
 
-    // If file is not present on disk (e.g. Vercel cold container), restore from Firebase
     if (!fs.existsSync(filePath)) {
       if (test.html_content) {
         try { fs.writeFileSync(filePath, test.html_content, 'utf8'); } catch (e) {}
@@ -139,7 +258,6 @@ router.get('/:id/run', authenticate, async (req, res) => {
     }
 
     if (!fs.existsSync(filePath)) {
-      // Check bundled sample as final fallback
       const bundled = path.join(__dirname, '..', 'uploads', 'sample_jee_main_2026.html');
       if (fs.existsSync(bundled)) {
         try { fs.copyFileSync(bundled, filePath); } catch (e) {}
@@ -153,7 +271,6 @@ router.get('/:id/run', authenticate, async (req, res) => {
     let html = fs.readFileSync(filePath, 'utf8');
 
     // Retrieve past submission for candidate (Rewatch Mode) unless retake requested
-    const isRetake = req.query.retake === '1' || req.query.retake === 'true';
     let pastSubmission = null;
 
     if (!isRetake) {
@@ -175,7 +292,7 @@ router.get('/:id/run', authenticate, async (req, res) => {
       }
     }
 
-    // Create the security & sync bridge
+    // Create the security, proctoring & sync bridge
     const bridgeCode = createBridgeScript(
       test.id,
       req.session.token,
@@ -200,7 +317,7 @@ router.get('/:id/run', authenticate, async (req, res) => {
 
 /**
  * POST /api/tests/:id/submit
- * Records student submission, scores, time taken, and device telemetry
+ * Records student submission, scores, time taken, device info, and Proctoring Photos (Feature 2)
  */
 router.post('/:id/submit', authenticate, async (req, res) => {
   try {
@@ -211,7 +328,8 @@ router.post('/:id/submit', authenticate, async (req, res) => {
       incorrectCount = 0,
       unattemptedCount = 0,
       timeTakenSec = 0,
-      answersJson = {}
+      answersJson = {},
+      proctoringPhotos = []
     } = req.body;
 
     let test = await query.get('SELECT * FROM tests WHERE id = ? OR test_code = ?', [testId, testId]).catch(() => null);
@@ -229,14 +347,15 @@ router.post('/:id/submit', authenticate, async (req, res) => {
       ip: req.session.ipAddress || '127.0.0.1'
     });
 
+    const proctoringJson = typeof proctoringPhotos === 'string' ? proctoringPhotos : JSON.stringify(proctoringPhotos || []);
     let submissionId = Date.now();
 
     try {
       const result = await query.run(
         `INSERT INTO submissions 
          (user_id, test_id, session_id, total_score, max_marks, correct_count, incorrect_count, 
-          unattempted_count, accuracy_percent, time_taken_sec, answers_json, device_info)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          unattempted_count, accuracy_percent, time_taken_sec, answers_json, proctoring_photos, device_info)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           req.user.id,
           test?.id || testId,
@@ -249,6 +368,7 @@ router.post('/:id/submit', authenticate, async (req, res) => {
           accuracy,
           timeTakenSec,
           typeof answersJson === 'string' ? answersJson : JSON.stringify(answersJson),
+          proctoringJson,
           deviceInfo
         ]
       );
@@ -275,13 +395,14 @@ router.post('/:id/submit', authenticate, async (req, res) => {
         accuracy_percent: accuracy,
         time_taken_sec: timeTakenSec,
         answers_json: typeof answersJson === 'string' ? answersJson : JSON.stringify(answersJson),
+        proctoring_photos: proctoringPhotos || [],
         device_info: deviceInfo,
         submitted_at: new Date().toISOString()
       }).catch(err => console.error('[Firebase] saveSubmission error:', err.message));
     }
 
     return res.json({
-      message: 'Submission successfully recorded',
+      message: 'Submission successfully recorded with proctoring audit',
       submissionId,
       score: totalScore,
       accuracy
@@ -289,51 +410,6 @@ router.post('/:id/submit', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Submit test error:', error);
     return res.status(500).json({ error: 'Failed to record test submission' });
-  }
-});
-
-/**
- * GET /api/tests/:id/my-result
- * Retrieves candidate's own submission details
- */
-router.get('/:id/my-result', authenticate, async (req, res) => {
-  try {
-    const testId = req.params.id;
-    let submission = await query.get(
-      `SELECT * FROM submissions WHERE test_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1`,
-      [testId, req.user.id]
-    ).catch(() => null);
-
-    if (!submission && firebaseStore.isAvailable()) {
-      const subs = await firebaseStore.getStudentSubmissions(req.user.id);
-      submission = subs.find(s => String(s.test_id) === String(testId));
-    }
-
-    if (!submission) {
-      return res.status(404).json({ error: 'No submission found for this test' });
-    }
-
-    let answers = {};
-    try {
-      answers = typeof submission.answers_json === 'string' ? JSON.parse(submission.answers_json) : (submission.answers_json || {});
-    } catch (e) {}
-
-    return res.json({
-      submission: {
-        id: submission.id,
-        totalScore: submission.total_score,
-        maxMarks: submission.max_marks || 300,
-        correct: submission.correct_count || 0,
-        incorrect: submission.incorrect_count || 0,
-        unattempted: submission.unattempted_count || 0,
-        accuracy: submission.accuracy_percent || 0,
-        timeTakenSec: submission.time_taken_sec || 0,
-        submittedAt: submission.submitted_at,
-        answers
-      }
-    });
-  } catch (error) {
-    return res.status(500).json({ error: 'Error loading test results' });
   }
 });
 
@@ -403,6 +479,51 @@ router.get('/my-attempts', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Fetch student attempts error:', error);
     return res.status(500).json({ error: 'Failed to retrieve test history' });
+  }
+});
+
+/**
+ * GET /api/tests/:id/my-result
+ * Retrieves candidate's own submission details
+ */
+router.get('/:id/my-result', authenticate, async (req, res) => {
+  try {
+    const testId = req.params.id;
+    let submission = await query.get(
+      `SELECT * FROM submissions WHERE test_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1`,
+      [testId, req.user.id]
+    ).catch(() => null);
+
+    if (!submission && firebaseStore.isAvailable()) {
+      const subs = await firebaseStore.getStudentSubmissions(req.user.id);
+      submission = subs.find(s => String(s.test_id) === String(testId));
+    }
+
+    if (!submission) {
+      return res.status(404).json({ error: 'No submission found for this test' });
+    }
+
+    let answers = {};
+    try {
+      answers = typeof submission.answers_json === 'string' ? JSON.parse(submission.answers_json) : (submission.answers_json || {});
+    } catch (e) {}
+
+    return res.json({
+      submission: {
+        id: submission.id,
+        totalScore: submission.total_score,
+        maxMarks: submission.max_marks || 300,
+        correct: submission.correct_count || 0,
+        incorrect: submission.incorrect_count || 0,
+        unattempted: submission.unattempted_count || 0,
+        accuracy: submission.accuracy_percent || 0,
+        timeTakenSec: submission.time_taken_sec || 0,
+        submittedAt: submission.submitted_at,
+        answers
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Error loading test results' });
   }
 });
 

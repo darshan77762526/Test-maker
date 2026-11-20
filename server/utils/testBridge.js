@@ -2,14 +2,27 @@
  * Generates the bridge client-side script injected into CBT HTML tests.
  * Manages:
  * - Single active session enforcement via real-time heartbeat
- * - Immediate lock-out if user logged in on another device
+ * - Automated Proctoring Snapshots (Feature 2)
+ * - Live Admin Emergency Broadcast & Errata Banner (Feature 5)
  * - Seamless submission and recording to server database & cloud
  * - Instant detailed performance analysis for student
- * - Automatic rewatch & review mode for previously attempted papers
+ * - Automatic rewatch & retake mode
  * - Ultra-smooth instructions checkbox & start button controller
  */
 function createBridgeScript(testId, userToken, userName, pastSubmission = null) {
-  const pastAnswersStr = pastSubmission && pastSubmission.answers_json ? pastSubmission.answers_json : 'null';
+  const safeTestId = JSON.stringify(String(testId));
+  const safeUserToken = JSON.stringify(String(userToken || ''));
+  let safePastAnswers = 'null';
+  try {
+    if (pastSubmission && pastSubmission.answers_json) {
+      const parsed = typeof pastSubmission.answers_json === 'string' 
+        ? JSON.parse(pastSubmission.answers_json) 
+        : pastSubmission.answers_json;
+      safePastAnswers = JSON.stringify(parsed);
+    }
+  } catch (e) {
+    safePastAnswers = 'null';
+  }
 
   return `
 <!-- CBT PLATFORM RUNNER & SECURITY BRIDGE -->
@@ -102,18 +115,77 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
     font-family: 'Inter', sans-serif;
   }
+  /* Live Emergency Errata / Broadcast Banner (Feature 5) */
+  #cbt-broadcast-banner {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100000;
+    background: #b91c1c;
+    color: #ffffff;
+    padding: 10px 20px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    animation: cbtPulse 2s infinite ease-in-out;
+  }
+  @keyframes cbtPulse {
+    0%, 100% { background-color: #b91c1c; }
+    50% { background-color: #dc2626; }
+  }
+  #cbt-broadcast-banner.warning {
+    background: #d97706;
+  }
   /* Ultra-smooth Proceed button overrides */
   #btn-start-exam {
     cursor: pointer !important;
     transition: all 0.15s ease !important;
     touch-action: manipulation;
   }
+  #cbt-proctor-container {
+    display: none;
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    z-index: 9999;
+    width: 140px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 2px solid #0284c7;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+    background: #000;
+  }
+  #cbt-proctor-video {
+    width: 100%;
+    height: auto;
+    display: block;
+    transform: scaleX(-1);
+  }
 </style>
+
+<!-- Live Broadcast Errata Ticker (Feature 5) -->
+<div id="cbt-broadcast-banner">
+  <span id="cbt-broadcast-text">⚠ LIVE EXAMINATION ANNOUNCEMENT: Please read carefully</span>
+</div>
+
+<!-- Proctoring Webcam Stream Container (Feature 2) -->
+<div id="cbt-proctor-container">
+  <video id="cbt-proctor-video" autoplay playsinline muted></video>
+</div>
+<canvas id="cbt-proctor-canvas" width="320" height="240" style="display:none;"></canvas>
 
 <div id="cbt-top-banner">
   <span>Candidate: <strong style="color:#f8fafc;">${userName}</strong></span>
   <span>&bull;</span>
   <span id="cbt-status-text" style="color:#22c55e;">● Live Session Verified</span>
+  <span id="cbt-proctor-badge" style="display:none; color:#38bdf8;">
+    <span>&bull;</span>
+    <span>📷 Proctor Active</span>
+  </span>
   <span id="cbt-retake-container" style="display:none;">
     <span>&bull;</span>
     <a href="/api/tests/${testId}/run?token=${userToken}&retake=1" id="cbt-retake-btn" style="color:#fbbf24; font-weight:700;">↻ Retake Exam</a>
@@ -137,11 +209,13 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
 
 <script>
 (function() {
-  const TEST_ID = ${testId};
-  const TOKEN = "${userToken}";
-  const PAST_ANSWERS = ${pastAnswersStr};
+  const TEST_ID = ${safeTestId};
+  const TOKEN = ${safeUserToken};
+  const PAST_ANSWERS = ${safePastAnswers};
   let isExamSubmitted = false;
   let heartbeatTimer = null;
+  let proctorStream = null;
+  const proctoringSnapshots = [];
 
   function showOverlay(title, msg, badge) {
     const overlay = document.getElementById('cbt-bridge-overlay');
@@ -152,7 +226,7 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     if (window.timerHandle) clearInterval(window.timerHandle);
   }
 
-  // 1. Live Session Heartbeat
+  // 1. Live Session Heartbeat & Errata Broadcast Receiver (Feature 5)
   async function sendHeartbeat() {
     if (isExamSubmitted) return;
     try {
@@ -172,19 +246,82 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
           data.message || 'You have logged in on another device or your session was revoked by Administrator.',
           'SESSION EXPIRED'
         );
+        return;
+      }
+
+      // Feature 5: Emergency Broadcast Banner
+      const broadcastBar = document.getElementById('cbt-broadcast-banner');
+      const broadcastText = document.getElementById('cbt-broadcast-text');
+      if (data.activeBroadcast && data.activeBroadcast.active && data.activeBroadcast.message) {
+        broadcastText.innerText = '📢 [OFFICIAL EXAM ERRATA]: ' + data.activeBroadcast.message;
+        broadcastBar.style.display = 'block';
+        if (data.activeBroadcast.level === 'warning') {
+          broadcastBar.className = 'warning';
+        } else {
+          broadcastBar.className = '';
+        }
+      } else {
+        broadcastBar.style.display = 'none';
       }
     } catch (e) {
       console.warn('Heartbeat check jitter:', e);
     }
   }
 
-  heartbeatTimer = setInterval(sendHeartbeat, 15000);
+  heartbeatTimer = setInterval(sendHeartbeat, 12000);
 
-  // 2. Test Submission & Sync
+  // 2. Automated Proctoring Webcam Capture (Feature 2)
+  async function initProctoring() {
+    if (PAST_ANSWERS) return; // Do not record webcam in rewatch mode
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        proctorStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' }
+        });
+        const video = document.getElementById('cbt-proctor-video');
+        if (video) {
+          video.srcObject = proctorStream;
+          video.play().catch(() => {});
+        }
+        document.getElementById('cbt-proctor-badge').style.display = 'inline';
+        document.getElementById('cbt-proctor-container').style.display = 'block';
+
+        // Capture initial entry frame
+        setTimeout(() => takeProctorSnapshot('exam_entry'), 1800);
+        // Periodic snapshot at 15 minutes
+        setTimeout(() => takeProctorSnapshot('midway_check'), 15 * 60 * 1000);
+      }
+    } catch (err) {
+      console.log('Webcam proctoring permission deferred or unavailable:', err.message);
+    }
+  }
+
+  function takeProctorSnapshot(triggerName) {
+    try {
+      const video = document.getElementById('cbt-proctor-video');
+      const canvas = document.getElementById('cbt-proctor-canvas');
+      if (!video || !canvas || !proctorStream) return;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, 320, 240);
+      const dataUri = canvas.toDataURL('image/jpeg', 0.65);
+      proctoringSnapshots.push({
+        trigger: triggerName,
+        timestamp: new Date().toISOString(),
+        photo: dataUri
+      });
+    } catch (e) {
+      console.warn('Proctor snapshot error:', e);
+    }
+  }
+
+  // 3. Test Submission & Sync with Proctoring Photos
   async function handleExamSubmission() {
     if (isExamSubmitted) return;
     isExamSubmitted = true;
     if (heartbeatTimer) clearInterval(heartbeatTimer);
+
+    // Take final completion proctor snapshot
+    takeProctorSnapshot('exam_submit');
 
     // Call native renderResults first to ensure UI and metrics are computed
     try {
@@ -255,7 +392,8 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
       incorrectCount,
       unattemptedCount,
       timeTakenSec,
-      answersJson: answersData
+      answersJson: answersData,
+      proctoringPhotos: proctoringSnapshots
     };
 
     // Show saved toast
@@ -263,6 +401,13 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     if (toast) {
       toast.style.display = 'block';
       setTimeout(() => { toast.style.display = 'none'; }, 4000);
+    }
+
+    // Stop webcam stream cleanly
+    if (proctorStream) {
+      proctorStream.getTracks().forEach(t => t.stop());
+      const pCont = document.getElementById('cbt-proctor-container');
+      if (pCont) pCont.style.display = 'none';
     }
 
     // Save to server & cloud Firebase
@@ -278,6 +423,10 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     } catch (err) {
       console.error('Failed to sync submission to server:', err);
     }
+
+    // Show Retake Button in Top Banner
+    const retakeCont = document.getElementById('cbt-retake-container');
+    if (retakeCont) retakeCont.style.display = 'inline';
 
     // Always show full detailed analysis to candidate
     try {
@@ -296,85 +445,75 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     handleExamSubmission();
   };
 
-  // 3. Instructions Checkbox & Start Button Controller (Instant & Smooth)
+  // 4. Instructions Checkbox & Start Button Controller (Instant, Smooth & Bug-Proof)
   function initExamControls() {
     const chk = document.getElementById('chk-declare');
     const startBtn = document.getElementById('btn-start-exam');
     if (!startBtn) return;
 
-    function applyEnabledStyles() {
+    function ensureEnabled() {
       startBtn.removeAttribute('disabled');
       startBtn.disabled = false;
       startBtn.classList.remove('disabled:bg-slate-300', 'disabled:cursor-not-allowed');
       startBtn.classList.add('bg-sky-600', 'hover:bg-sky-700');
       startBtn.style.backgroundColor = '#0284c7';
+      startBtn.style.color = '#ffffff';
       startBtn.style.cursor = 'pointer';
       startBtn.style.pointerEvents = 'auto';
       startBtn.style.opacity = '1';
     }
 
-    function applyDisabledStyles() {
-      startBtn.setAttribute('disabled', 'disabled');
-      startBtn.disabled = true;
-      startBtn.style.backgroundColor = '#cbd5e1';
-      startBtn.style.cursor = 'not-allowed';
-      startBtn.style.pointerEvents = 'none';
-      startBtn.style.opacity = '0.7';
-    }
-
-    function syncStart() {
-      if (!chk) {
-        applyEnabledStyles();
-        return;
-      }
-      if (chk.checked) {
-        applyEnabledStyles();
-      } else {
-        applyDisabledStyles();
-      }
-    }
-
     function launchExam() {
       if (chk) chk.checked = true;
-      applyEnabledStyles();
+      ensureEnabled();
+      initProctoring(); // Initialize camera snapshot engine
+
       if (typeof window.clearSavedProgress === 'function') window.clearSavedProgress();
+
       if (typeof window.beginFreshExam === 'function') {
-        window.beginFreshExam();
+        try { window.beginFreshExam(); } catch (e) {}
       } else if (typeof window.showScreen === 'function') {
-        window.showScreen('exam');
-        if (typeof window.visitQuestion === 'function') window.visitQuestion(0);
-        if (typeof window.startTimer === 'function') window.startTimer();
+        try {
+          window.showScreen('exam');
+          if (typeof window.visitQuestion === 'function') window.visitQuestion(0);
+          if (typeof window.startTimer === 'function') window.startTimer();
+        } catch (e) {}
       }
+
+      // Guarantee immediate DOM transition across all devices and browsers
+      const vInst = document.getElementById('view-instructions');
+      const vExam = document.getElementById('view-exam');
+      const vRes = document.getElementById('view-results');
+      if (vInst) vInst.classList.add('hidden');
+      if (vExam) vExam.classList.remove('hidden');
+      if (vRes) vRes.classList.add('hidden');
+      if (typeof window.visitQuestion === 'function') {
+        try { window.visitQuestion(0); } catch (e) {}
+      }
+      if (typeof window.startTimer === 'function') {
+        try { window.startTimer(); } catch (e) {}
+      }
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
 
     if (chk) {
-      chk.addEventListener('change', syncStart);
-      chk.addEventListener('input', syncStart);
-      chk.addEventListener('click', () => setTimeout(syncStart, 5));
-      chk.addEventListener('touchstart', () => setTimeout(syncStart, 5));
-
-      const label = chk.closest('label');
-      if (label) {
-        label.addEventListener('click', () => setTimeout(syncStart, 10));
-        label.addEventListener('touchstart', () => setTimeout(syncStart, 10));
-      }
+      chk.addEventListener('change', ensureEnabled);
+      chk.addEventListener('input', ensureEnabled);
+      chk.addEventListener('click', ensureEnabled);
     }
 
-    // Direct click on Proceed to Exam button auto-checks and starts immediately
+    // Direct click or touch on Proceed to Exam button auto-checks and starts immediately
     startBtn.onclick = function(e) {
-      e.preventDefault();
       launchExam();
     };
-    startBtn.addEventListener('click', (e) => {
-      e.preventDefault();
+    startBtn.addEventListener('click', () => {
       launchExam();
     });
-    startBtn.addEventListener('touchend', (e) => {
-      e.preventDefault();
+    startBtn.addEventListener('touchend', () => {
       launchExam();
     });
 
-    syncStart();
+    ensureEnabled();
   }
 
   // Run immediately and across all lifecycle checkpoints
@@ -384,27 +523,26 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
   }
   setTimeout(initExamControls, 50);
   setTimeout(initExamControls, 200);
-  setTimeout(initExamControls, 600);
-  setTimeout(initExamControls, 1200);
+  setTimeout(initExamControls, 500);
+  setTimeout(initExamControls, 1000);
 
-  // Monitor checkbox state dynamically
-  let pollCount = 0;
-  const pollInterval = setInterval(() => {
-    pollCount++;
-    const chk = document.getElementById('chk-declare');
+  // Keep button enabled continuously against any external override
+  const keepEnabledInterval = setInterval(() => {
     const startBtn = document.getElementById('btn-start-exam');
-    if (chk && chk.checked && startBtn && startBtn.disabled) {
-      startBtn.disabled = false;
-      startBtn.removeAttribute('disabled');
-      startBtn.style.backgroundColor = '#0284c7';
-      startBtn.style.pointerEvents = 'auto';
-      startBtn.style.opacity = '1';
+    if (startBtn) {
+      if (startBtn.disabled || startBtn.style.pointerEvents === 'none') {
+        startBtn.disabled = false;
+        startBtn.removeAttribute('disabled');
+        startBtn.style.backgroundColor = '#0284c7';
+        startBtn.style.pointerEvents = 'auto';
+        startBtn.style.opacity = '1';
+        startBtn.style.cursor = 'pointer';
+      }
     }
-    if (pollCount > 30) clearInterval(pollInterval);
-  }, 100);
+  }, 250);
 
   window.addEventListener('DOMContentLoaded', () => {
-    // 4. Rewatch & Review Mode for previously submitted attempts
+    // 5. Rewatch & Review Mode for previously submitted attempts
     if (PAST_ANSWERS) {
       isExamSubmitted = true;
       const statusText = document.getElementById('cbt-status-text');
@@ -426,6 +564,9 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
           console.error('Error loading saved attempt:', e);
         }
       }, 300);
+    } else {
+      // Prompt for camera warm-up on fresh test load
+      setTimeout(initProctoring, 1000);
     }
 
     const confirmBtn = document.getElementById('btn-confirm-submit');
@@ -440,6 +581,9 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     if (!isExamSubmitted) {
       e.preventDefault();
       e.returnValue = 'You have an active exam session. Are you sure you want to exit?';
+    }
+    if (proctorStream) {
+      proctorStream.getTracks().forEach(t => t.stop());
     }
   });
 })();

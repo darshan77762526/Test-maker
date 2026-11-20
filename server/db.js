@@ -7,7 +7,7 @@ const firebaseStore = require('./firebase');
 const isVercel = !!process.env.VERCEL;
 const dataDir = process.env.DATA_DIR || (isVercel ? '/tmp/data' : path.join(__dirname, '..', 'data'));
 if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+  try { fs.mkdirSync(dataDir, { recursive: true }); } catch (e) {}
 }
 
 const dbPath = path.join(dataDir, 'cbt.sqlite');
@@ -93,8 +93,10 @@ async function initDatabase() {
       duration_minutes INTEGER DEFAULT 180,
       total_questions INTEGER DEFAULT 0,
       subjects TEXT DEFAULT '[]',
-      hide_results_student INTEGER DEFAULT 1,
+      hide_results_student INTEGER DEFAULT 0,
       is_active INTEGER DEFAULT 1,
+      window_start DATETIME,
+      window_end DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -111,6 +113,7 @@ async function initDatabase() {
       accuracy_percent REAL DEFAULT 0,
       time_taken_sec INTEGER DEFAULT 0,
       answers_json TEXT,
+      proctoring_photos TEXT,
       device_info TEXT,
       submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -134,6 +137,11 @@ async function initDatabase() {
 
   await query.exec(schema);
 
+  // Safe table migrations for existing databases
+  await query.exec(`ALTER TABLE tests ADD COLUMN window_start DATETIME`).catch(() => {});
+  await query.exec(`ALTER TABLE tests ADD COLUMN window_end DATETIME`).catch(() => {});
+  await query.exec(`ALTER TABLE submissions ADD COLUMN proctoring_photos TEXT`).catch(() => {});
+
   // Seed administrator if configured in environment
   const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.toLowerCase().trim() : null;
   const rawPass = process.env.ADMIN_PASSWORD;
@@ -149,18 +157,13 @@ async function initDatabase() {
       );
       console.log(`[DB] Created administrator account from environment: ${adminEmail}`);
     }
-  } else {
-    const anyAdmin = await query.get("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1");
-    if (!anyAdmin) {
-      console.log('[DB] Notice: Set ADMIN_EMAIL and ADMIN_PASSWORD in environment to initialize your admin account.');
-    }
   }
 
   // Pre-seed sample test ONCE if available and never deleted by admin
   const isDeleted = await query.get('SELECT * FROM deleted_tests WHERE test_code = ?', ['JEE2026S1']);
   const isFbDeleted = await firebaseStore.isTestDeleted('JEE2026S1');
   if (isDeleted || isFbDeleted) {
-    return; // Admin deleted this test, do not re-seed!
+    return;
   }
 
   const sampleFileName = 'sample_jee_main_2026.html';
@@ -191,7 +194,7 @@ async function initDatabase() {
           180,
           75,
           JSON.stringify(['Physics', 'Chemistry', 'Mathematics']),
-          0 // Detailed analysis enabled
+          0
         ]
       );
       console.log(`[DB] Pre-seeded sample test: JEE (Main) 2026 Shift 1`);
