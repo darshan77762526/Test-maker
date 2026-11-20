@@ -1,16 +1,26 @@
 /**
  * Core Application Router and State Controller
+ * Features:
+ * - Active Session Enforcement & Instant Termination Alerting
+ * - Authenticated Fetch Interceptor with Automatic Session Validation
+ * - Client Heartbeat Poller for Real-time Device Lockouts
  */
 window.App = {
   token: localStorage.getItem('cbt_token') || null,
   user: JSON.parse(localStorage.getItem('cbt_user') || 'null'),
   currentRoute: '',
+  heartbeatTimer: null,
 
   init() {
     this.bindEvents();
     this.updateNav();
     this.route();
     window.addEventListener('hashchange', () => this.route());
+
+    // Start background session verification if logged in
+    if (this.token) {
+      this.startHeartbeat();
+    }
   },
 
   bindEvents() {
@@ -26,6 +36,85 @@ window.App = {
     localStorage.setItem('cbt_token', token);
     localStorage.setItem('cbt_user', JSON.stringify(user));
     this.updateNav();
+    this.startHeartbeat();
+  },
+
+  async apiFetch(url, options = {}) {
+    const headers = options.headers || {};
+    if (this.token) {
+      headers['Authorization'] = 'Bearer ' + this.token;
+    }
+    options.headers = headers;
+
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+      try {
+        const cloned = res.clone();
+        const data = await cloned.json();
+        if (data.error === 'SESSION_TERMINATED') {
+          this.showSessionTerminated(data.message, data.reason);
+        }
+      } catch (e) {}
+    }
+    return res;
+  },
+
+  startHeartbeat() {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = setInterval(async () => {
+      if (!this.token) return;
+      try {
+        const res = await fetch('/api/sessions/ping', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + this.token,
+            'Content-Type': 'application/json',
+            'x-screen-size': window.innerWidth + 'x' + window.innerHeight
+          }
+        });
+        const data = await res.json();
+        if (!res.ok || data.error === 'SESSION_TERMINATED') {
+          clearInterval(this.heartbeatTimer);
+          this.showSessionTerminated(
+            data.message || 'Your examination session was terminated by the Administrator.',
+            data.reason || 'terminated_by_admin'
+          );
+        }
+      } catch (e) {}
+    }, 12000);
+  },
+
+  showSessionTerminated(message, reason) {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    const modal = document.getElementById('modal-session-terminated');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('term-modal-title');
+    const msgEl = document.getElementById('term-modal-msg');
+
+    if (reason === 'new_login_on_different_device') {
+      if (titleEl) titleEl.innerText = 'Multiple Device Login Detected';
+      if (msgEl) msgEl.innerText = 'Your candidate account was logged in from another device. For examination security, only one device session can be active at a time.';
+    } else {
+      if (titleEl) titleEl.innerText = 'Active Session Revoked';
+      if (msgEl) msgEl.innerText = message || 'Your examination session was forcefully terminated by the Administrator. Access to testing operations has been revoked.';
+    }
+
+    modal.classList.remove('hidden');
+  },
+
+  handleTerminatedAcknowledge() {
+    localStorage.removeItem('cbt_token');
+    localStorage.removeItem('cbt_user');
+    this.token = null;
+    this.user = null;
+    this.updateNav();
+
+    const modal = document.getElementById('modal-session-terminated');
+    if (modal) modal.classList.add('hidden');
+
+    window.location.hash = '#/login';
+    this.toast('Session ended. Please sign in again.', 'info');
   },
 
   async logout() {
@@ -37,6 +126,7 @@ window.App = {
         });
       }
     } catch (e) {}
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     localStorage.removeItem('cbt_token');
     localStorage.removeItem('cbt_user');
     this.token = null;

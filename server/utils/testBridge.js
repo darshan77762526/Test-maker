@@ -114,6 +114,10 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
   <span>Candidate: <strong style="color:#f8fafc;">${userName}</strong></span>
   <span>&bull;</span>
   <span id="cbt-status-text" style="color:#22c55e;">● Live Session Verified</span>
+  <span id="cbt-retake-container" style="display:none;">
+    <span>&bull;</span>
+    <a href="/api/tests/${testId}/run?token=${userToken}&retake=1" id="cbt-retake-btn" style="color:#fbbf24; font-weight:700;">↻ Retake Exam</a>
+  </span>
   <span>&bull;</span>
   <a href="/#/student" id="cbt-exit-btn">← Exit to Dashboard</a>
 </div>
@@ -127,7 +131,7 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     <p style="font-size: 14px; color: #94a3b8; line-height: 1.6;" id="cbt-overlay-msg">
       Your account was logged in from another device. For examination security, only one device session can be active at a time.
     </p>
-    <button class="cbt-bridge-btn" onclick="window.location.href='/#/login'">Return to Login</button>
+    <button class="cbt-bridge-btn" onclick="localStorage.clear(); window.location.href='/#/login';">Return to Login</button>
   </div>
 </div>
 
@@ -408,6 +412,8 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
         statusText.innerHTML = '● Reviewing Saved Attempt';
         statusText.style.color = '#38bdf8';
       }
+      const retakeContainer = document.getElementById('cbt-retake-container');
+      if (retakeContainer) retakeContainer.style.display = 'inline';
 
       setTimeout(() => {
         try {

@@ -1,12 +1,36 @@
 /**
- * Student Examination Catalog & Test Launcher
+ * Student Examination Catalog, History & Retake Controller
  */
 window.StudentModule = {
   init() {
-    const refreshBtn = document.getElementById('btn-refresh-tests');
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', () => this.loadDashboard());
-    }
+    this.bindTabs();
+    this.bindButtons();
+  },
+
+  bindTabs() {
+    const tabBtns = document.querySelectorAll('.student-tab-btn');
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-target');
+        tabBtns.forEach(b => {
+          b.classList.remove('active', 'text-sky-600', 'border-sky-600');
+          b.classList.add('text-slate-600', 'border-transparent');
+        });
+        btn.classList.add('active', 'text-sky-600', 'border-sky-600');
+        btn.classList.remove('text-slate-600', 'border-transparent');
+
+        document.querySelectorAll('.student-tab-content').forEach(c => c.classList.add('hidden'));
+        document.getElementById(target)?.classList.remove('hidden');
+
+        if (target === 'student-tab-catalog') this.loadCatalog();
+        if (target === 'student-tab-history') this.loadAttempts();
+      });
+    });
+  },
+
+  bindButtons() {
+    document.getElementById('btn-refresh-tests')?.addEventListener('click', () => this.loadCatalog());
+    document.getElementById('btn-refresh-history')?.addEventListener('click', () => this.loadAttempts());
   },
 
   async loadDashboard() {
@@ -23,6 +47,11 @@ window.StudentModule = {
       deviceEl.innerText = `Resolution: ${window.screen.width}x${window.screen.height} • Browser Verified`;
     }
 
+    await this.loadCatalog();
+    this.loadAttempts(true);
+  },
+
+  async loadCatalog() {
     const container = document.getElementById('student-tests-grid');
     if (!container) return;
 
@@ -34,11 +63,15 @@ window.StudentModule = {
     `;
 
     try {
-      const res = await fetch('/api/tests', {
-        headers: { 'Authorization': 'Bearer ' + App.token }
-      });
+      const res = await App.apiFetch('/api/tests');
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load test papers');
+      if (!res.ok) {
+        if (data.error === 'SESSION_TERMINATED') {
+          App.showSessionTerminated(data.message, data.reason);
+          return;
+        }
+        throw new Error(data.error || 'Failed to load test papers');
+      }
 
       this.renderTests(data.tests || []);
     } catch (err) {
@@ -75,15 +108,21 @@ window.StudentModule = {
       let actionSection = '';
       if (test.hasSubmitted) {
         actionSection = `
-          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <span class="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">Attempt Completed</span>
-              <span class="text-xs font-bold text-emerald-700">Detailed Analysis Ready</span>
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Completed Attempt</span>
+              <span class="text-xs font-extrabold ${test.userScore >= 0 ? 'text-emerald-700' : 'text-red-600'}">Score: ${test.userScore !== null ? test.userScore : 0}</span>
             </div>
-            <a href="/api/tests/${test.id}/run?token=${App.token}" target="_blank" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
-              <span>Rewatch & Review</span>
-              <i class="fa-solid fa-square-poll-vertical"></i>
-            </a>
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <a href="/api/tests/${test.id}/run?token=${App.token}" target="_blank" class="py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm text-center">
+                <i class="fa-solid fa-square-poll-vertical"></i>
+                <span>Rewatch</span>
+              </a>
+              <a href="/api/tests/${test.id}/run?token=${App.token}&retake=1" target="_blank" class="py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm text-center">
+                <i class="fa-solid fa-rotate-right"></i>
+                <span>Retake</span>
+              </a>
+            </div>
           </div>
         `;
       } else {
@@ -115,6 +154,75 @@ window.StudentModule = {
         </div>
       `;
     }).join('');
+  },
+
+  async loadAttempts(silent = false) {
+    const tbody = document.getElementById('student-history-body');
+    if (!tbody) return;
+
+    if (!silent) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> Loading test attempts...</td></tr>`;
+    }
+
+    try {
+      const res = await App.apiFetch('/api/tests/my-attempts');
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.error === 'SESSION_TERMINATED') {
+          App.showSessionTerminated(data.message, data.reason);
+          return;
+        }
+        throw new Error(data.error || 'Failed to fetch attempt history');
+      }
+
+      const attempts = data.attempts || [];
+      if (attempts.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="7" class="text-center py-10 text-slate-400">
+              <i class="fa-regular fa-folder-open text-2xl mb-2 block"></i>
+              You haven't completed any examinations yet. Select an exam from the Catalog to begin.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = attempts.map(a => {
+        const timeMins = Math.round(a.timeTakenSec / 60);
+        return `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="py-3 px-4">
+              <div class="font-bold text-slate-900">${a.testTitle}</div>
+              <div class="text-[11px] font-mono text-slate-500">${a.testCode}</div>
+            </td>
+            <td class="py-3 px-4 text-center font-extrabold text-sm ${a.totalScore >= 0 ? 'text-emerald-700' : 'text-red-600'}">
+              ${a.totalScore} <span class="text-slate-400 font-normal text-[11px]">/ ${a.maxMarks}</span>
+            </td>
+            <td class="py-3 px-4 text-center font-bold text-slate-700">${a.accuracy}%</td>
+            <td class="py-3 px-4 text-center text-[11px]">
+              <span class="text-emerald-700 font-bold">${a.correct}</span> / 
+              <span class="text-red-600 font-bold">${a.incorrect}</span> / 
+              <span class="text-slate-400">${a.unattempted}</span>
+            </td>
+            <td class="py-3 px-4 text-center text-slate-600 font-mono text-xs">${timeMins}m</td>
+            <td class="py-3 px-4 text-slate-500 text-xs">${new Date(a.submittedAt).toLocaleDateString()} ${new Date(a.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+            <td class="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+              <a href="/api/tests/${a.testId}/run?token=${App.token}" target="_blank" class="inline-flex items-center gap-1 px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 font-bold text-[11px] rounded transition">
+                <i class="fa-solid fa-eye"></i>
+                <span>Rewatch</span>
+              </a>
+              <a href="/api/tests/${a.testId}/run?token=${App.token}&retake=1" target="_blank" class="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-[11px] rounded transition">
+                <i class="fa-solid fa-rotate-right"></i>
+                <span>Retake</span>
+              </a>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-red-500">${err.message}</td></tr>`;
+    }
   }
 };
 

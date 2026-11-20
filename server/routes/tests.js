@@ -152,21 +152,26 @@ router.get('/:id/run', authenticate, async (req, res) => {
 
     let html = fs.readFileSync(filePath, 'utf8');
 
-    // Retrieve past submission for candidate (Rewatch Mode)
-    let pastSubmission = await query.get(
-      'SELECT answers_json, total_score, submitted_at FROM submissions WHERE test_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1',
-      [test.id, req.user.id]
-    ).catch(() => null);
+    // Retrieve past submission for candidate (Rewatch Mode) unless retake requested
+    const isRetake = req.query.retake === '1' || req.query.retake === 'true';
+    let pastSubmission = null;
 
-    if (!pastSubmission && firebaseStore.isAvailable()) {
-      const subs = await firebaseStore.getStudentSubmissions(req.user.id);
-      const match = subs.find(s => String(s.test_id) === String(test.id));
-      if (match) {
-        pastSubmission = {
-          answers_json: typeof match.answers_json === 'string' ? match.answers_json : JSON.stringify(match.answers_json || {}),
-          total_score: match.total_score,
-          submitted_at: match.submitted_at
-        };
+    if (!isRetake) {
+      pastSubmission = await query.get(
+        'SELECT answers_json, total_score, submitted_at FROM submissions WHERE test_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1',
+        [test.id, req.user.id]
+      ).catch(() => null);
+
+      if (!pastSubmission && firebaseStore.isAvailable()) {
+        const subs = await firebaseStore.getStudentSubmissions(req.user.id);
+        const match = subs.find(s => String(s.test_id) === String(test.id));
+        if (match) {
+          pastSubmission = {
+            answers_json: typeof match.answers_json === 'string' ? match.answers_json : JSON.stringify(match.answers_json || {}),
+            total_score: match.total_score,
+            submitted_at: match.submitted_at
+          };
+        }
       }
     }
 
@@ -329,6 +334,75 @@ router.get('/:id/my-result', authenticate, async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ error: 'Error loading test results' });
+  }
+});
+
+/**
+ * GET /api/tests/my-attempts
+ * Returns all past test attempts by this candidate with complete stats & analysis
+ */
+router.get('/my-attempts', authenticate, async (req, res) => {
+  try {
+    let attempts = [];
+    try {
+      attempts = await query.all(
+        `SELECT s.*, t.title AS test_title, t.test_code
+         FROM submissions s
+         JOIN tests t ON t.id = s.test_id
+         WHERE s.user_id = ?
+         ORDER BY s.submitted_at DESC`,
+        [req.user.id]
+      );
+    } catch (e) {}
+
+    if (firebaseStore.isAvailable()) {
+      try {
+        const fbSubs = await firebaseStore.getStudentSubmissions(req.user.id);
+        if (fbSubs && fbSubs.length > 0) {
+          fbSubs.forEach(fs => {
+            const exists = attempts.find(a => String(a.id) === String(fs.id));
+            if (!exists) {
+              attempts.push({
+                id: fs.id,
+                test_id: fs.test_id,
+                test_title: fs.test_title || 'CBT Paper',
+                test_code: fs.test_code || 'CBT',
+                total_score: fs.total_score,
+                max_marks: fs.max_marks || 300,
+                correct_count: fs.correct_count || 0,
+                incorrect_count: fs.incorrect_count || 0,
+                unattempted_count: fs.unattempted_count || 0,
+                accuracy_percent: fs.accuracy_percent || 0,
+                time_taken_sec: fs.time_taken_sec || 0,
+                submitted_at: fs.submitted_at
+              });
+            }
+          });
+        }
+      } catch (e) {}
+    }
+
+    attempts.sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
+
+    return res.json({
+      attempts: attempts.map(a => ({
+        id: a.id,
+        testId: a.test_id,
+        testTitle: a.test_title,
+        testCode: a.test_code,
+        totalScore: a.total_score,
+        maxMarks: a.max_marks || 300,
+        correct: a.correct_count || 0,
+        incorrect: a.incorrect_count || 0,
+        unattempted: a.unattempted_count || 0,
+        accuracy: a.accuracy_percent || 0,
+        timeTakenSec: a.time_taken_sec || 0,
+        submittedAt: a.submitted_at
+      }))
+    });
+  } catch (error) {
+    console.error('Fetch student attempts error:', error);
+    return res.status(500).json({ error: 'Failed to retrieve test history' });
   }
 });
 

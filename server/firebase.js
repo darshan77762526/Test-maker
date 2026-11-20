@@ -92,6 +92,41 @@ const firebaseStore = {
       ...session,
       updatedAt: new Date().toISOString()
     });
+    // Also index by token key for O(1) lookup
+    if (session.token) {
+      await rtdb.ref(`cbt/sessions_by_token/${safeKey(session.token)}`).set({
+        sessionId: session.id,
+        userId: session.user_id,
+        isActive: session.is_active,
+        terminatedReason: session.terminated_reason || null,
+        updatedAt: new Date().toISOString()
+      });
+    }
+  },
+
+  async getSessionByToken(token) {
+    const rtdb = initFirebase();
+    if (!rtdb || !token) return null;
+    try {
+      const tKey = safeKey(token);
+      // Try fast index first
+      const fastSnap = await rtdb.ref(`cbt/sessions_by_token/${tKey}`).once('value');
+      if (fastSnap.exists()) {
+        const fastVal = fastSnap.val();
+        if (fastVal.sessionId) {
+          const direct = await rtdb.ref(`cbt/sessions/${fastVal.sessionId}`).once('value');
+          if (direct.exists()) return direct.val();
+        }
+      }
+      // Scan sessions
+      const snap = await rtdb.ref('cbt/sessions').once('value');
+      const val = snap.val();
+      if (!val) return null;
+      return Object.values(val).find(s => s.token === token) || null;
+    } catch (e) {
+      console.error('[Firebase] getSessionByToken error:', e.message);
+      return null;
+    }
   },
 
   async getSessions() {
@@ -108,6 +143,41 @@ const firebaseStore = {
     }
   },
 
+  async terminateSession(sessionId, token = null) {
+    const rtdb = initFirebase();
+    if (!rtdb) return;
+    try {
+      const snap = await rtdb.ref('cbt/sessions').once('value');
+      const val = snap.val();
+      if (!val) return;
+      const updates = {};
+      Object.entries(val).forEach(([key, s]) => {
+        if (
+          String(s.id) === String(sessionId) || 
+          key === String(sessionId) || 
+          (token && s.token === token)
+        ) {
+          updates[`cbt/sessions/${key}/is_active`] = 0;
+          updates[`cbt/sessions/${key}/terminated_reason`] = 'terminated_by_admin';
+          updates[`cbt/sessions/${key}/terminated_at`] = new Date().toISOString();
+          if (s.token) {
+            updates[`cbt/sessions_by_token/${safeKey(s.token)}/isActive`] = 0;
+            updates[`cbt/sessions_by_token/${safeKey(s.token)}/terminatedReason`] = 'terminated_by_admin';
+          }
+        }
+      });
+      if (token) {
+        updates[`cbt/sessions_by_token/${safeKey(token)}/isActive`] = 0;
+        updates[`cbt/sessions_by_token/${safeKey(token)}/terminatedReason`] = 'terminated_by_admin';
+      }
+      if (Object.keys(updates).length > 0) {
+        await rtdb.ref().update(updates);
+      }
+    } catch (e) {
+      console.error('[Firebase] terminateSession error:', e.message);
+    }
+  },
+
   async terminateOldSessions(userId, currentToken) {
     const rtdb = initFirebase();
     if (!rtdb) return;
@@ -121,6 +191,10 @@ const firebaseStore = {
           updates[`cbt/sessions/${key}/is_active`] = 0;
           updates[`cbt/sessions/${key}/terminated_reason`] = 'new_login_on_different_device';
           updates[`cbt/sessions/${key}/terminated_at`] = new Date().toISOString();
+          if (s.token) {
+            updates[`cbt/sessions_by_token/${safeKey(s.token)}/isActive`] = 0;
+            updates[`cbt/sessions_by_token/${safeKey(s.token)}/terminatedReason`] = 'new_login_on_different_device';
+          }
         }
       });
       if (Object.keys(updates).length > 0) {
@@ -175,11 +249,9 @@ const firebaseStore = {
     const rtdb = initFirebase();
     if (!rtdb) return;
     try {
-      // Remove from active tests
       await rtdb.ref(`cbt/tests/${testId}`).remove();
       if (testCode) {
         await rtdb.ref(`cbt/tests/${safeKey(testCode)}`).remove();
-        // Record in deleted_tests to prevent auto-re-seeding
         await rtdb.ref(`cbt/deleted_tests/${safeKey(testCode)}`).set({
           deletedAt: new Date().toISOString()
         });
@@ -217,7 +289,6 @@ const firebaseStore = {
     try {
       const snap = await rtdb.ref(`cbt/submissions/${id}`).once('value');
       if (snap.exists()) return snap.val();
-      // Search all submissions
       const allSnap = await rtdb.ref('cbt/submissions').once('value');
       const val = allSnap.val();
       if (!val) return null;

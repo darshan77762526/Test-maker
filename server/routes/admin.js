@@ -197,6 +197,8 @@ router.get('/sessions', async (req, res) => {
 router.post('/sessions/:id/terminate', async (req, res) => {
   try {
     const sessionId = req.params.id;
+    const session = await query.get('SELECT token FROM sessions WHERE id = ?', [sessionId]).catch(() => null);
+
     await query.run(
       `UPDATE sessions 
        SET is_active = 0, terminated_reason = 'terminated_by_admin' 
@@ -205,16 +207,7 @@ router.post('/sessions/:id/terminate', async (req, res) => {
     );
 
     if (firebaseStore.isAvailable()) {
-      try {
-        const rtdb = firebaseStore.getDb();
-        if (rtdb) {
-          await rtdb.ref(`cbt/sessions/${sessionId}`).update({
-            is_active: 0,
-            terminated_reason: 'terminated_by_admin',
-            terminated_at: new Date().toISOString()
-          });
-        }
-      } catch (e) {}
+      await firebaseStore.terminateSession(sessionId, session ? session.token : null);
     }
 
     return res.json({ message: 'Session forcefully terminated' });
