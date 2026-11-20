@@ -501,6 +501,20 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
       if (vRes) vRes.classList.add('hidden');
       window.scrollTo({ top: 0, behavior: 'instant' });
 
+      // Request device-wide fullscreen mode upon proceeding
+      try {
+        const root = document.documentElement;
+        if (root.requestFullscreen) {
+          root.requestFullscreen().catch(() => {});
+        } else if (root.webkitRequestFullscreen) {
+          root.webkitRequestFullscreen();
+        } else if (root.mozRequestFullScreen) {
+          root.mozRequestFullScreen();
+        } else if (root.msRequestFullscreen) {
+          root.msRequestFullscreen();
+        }
+      } catch (fsErr) {}
+
       // Cleanly start fresh exam state
       if (typeof window.clearSavedProgress === 'function') {
         try { window.clearSavedProgress(); } catch (err) {}
