@@ -127,19 +127,40 @@ window.StudentModule = {
         `<span class="px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 text-[11px] font-semibold">${s}</span>`
       ).join(' ');
 
-      let windowBadge = '';
-      const isUpcoming = test.windowStatus === 'UPCOMING';
-      const isExpired = test.windowStatus === 'EXPIRED';
+      // Timezone-tolerant dynamic window evaluation using local device clock
+      const now = new Date();
+      let isUpcoming = false;
+      let isExpired = false;
 
-      if (isUpcoming && test.windowStart) {
-        const d = new Date(test.windowStart);
-        windowBadge = `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold"><i class="fa-regular fa-clock mr-1"></i>Opens ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+      function parseClientDate(str) {
+        if (!str) return null;
+        const d = new Date(str);
+        if (!isNaN(d.getTime())) return d;
+        const d2 = new Date(String(str).replace(' ', 'T'));
+        if (!isNaN(d2.getTime())) return d2;
+        return null;
+      }
+
+      const startDate = parseClientDate(test.windowStart);
+      const endDate = parseClientDate(test.windowEnd);
+
+      if (startDate) {
+        isUpcoming = startDate > now;
+      }
+      if (endDate) {
+        isExpired = endDate < now;
+      }
+
+      let windowBadge = '';
+      if (isUpcoming && startDate) {
+        windowBadge = `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold"><i class="fa-regular fa-clock mr-1"></i>Opens ${startDate.toLocaleDateString()} ${startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
       } else if (isExpired) {
         windowBadge = `<span class="px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold"><i class="fa-solid fa-lock mr-1"></i>Window Closed</span>`;
-      } else if (test.windowEnd) {
-        const d = new Date(test.windowEnd);
-        windowBadge = `<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold"><i class="fa-solid fa-calendar-check mr-1"></i>Active until ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+      } else if (endDate) {
+        windowBadge = `<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold"><i class="fa-solid fa-calendar-check mr-1"></i>Active until ${endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
       }
+
+      const clientTz = new Date().getTimezoneOffset();
 
       let actionSection = '';
       if (test.hasSubmitted) {
@@ -153,7 +174,7 @@ window.StudentModule = {
           `;
         } else {
           retakeBtn = `
-            <a href="/api/tests/${test.id}/run?token=${App.token}&retake=1" target="_blank" class="py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm text-center">
+            <a href="/api/tests/${test.id}/run?token=${App.token}&retake=1&tz=${clientTz}" target="_blank" class="py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm text-center">
               <i class="fa-solid fa-rotate-right"></i>
               <span>Retake</span>
             </a>
@@ -167,7 +188,7 @@ window.StudentModule = {
               <span class="text-xs font-extrabold ${test.userScore >= 0 ? 'text-emerald-700' : 'text-red-600'}">Score: ${test.userScore !== null ? test.userScore : 0}</span>
             </div>
             <div class="grid grid-cols-2 gap-2 pt-1">
-              <a href="/api/tests/${test.id}/run?token=${App.token}" target="_blank" class="py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm text-center">
+              <a href="/api/tests/${test.id}/run?token=${App.token}&tz=${clientTz}" target="_blank" class="py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm text-center">
                 <i class="fa-solid fa-square-poll-vertical"></i>
                 <span>Rewatch</span>
               </a>
@@ -192,7 +213,7 @@ window.StudentModule = {
           `;
         } else {
           actionSection = `
-            <a href="/api/tests/${test.id}/run?token=${App.token}" target="_blank" class="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2">
+            <a href="/api/tests/${test.id}/run?token=${App.token}&tz=${clientTz}" target="_blank" class="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2">
               <span>Enter CBT Examination</span>
               <i class="fa-solid fa-arrow-right"></i>
             </a>
@@ -277,11 +298,11 @@ window.StudentModule = {
             <td class="py-3 px-4 text-center text-slate-600 font-mono text-xs">${timeMins}m</td>
             <td class="py-3 px-4 text-slate-500 text-xs">${new Date(a.submittedAt).toLocaleDateString()} ${new Date(a.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
             <td class="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
-              <a href="/api/tests/${a.testId}/run?token=${App.token}" target="_blank" class="inline-flex items-center gap-1 px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 font-bold text-[11px] rounded transition">
+              <a href="/api/tests/${a.testId}/run?token=${App.token}&tz=${new Date().getTimezoneOffset()}" target="_blank" class="inline-flex items-center gap-1 px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 font-bold text-[11px] rounded transition">
                 <i class="fa-solid fa-eye"></i>
                 <span>Rewatch</span>
               </a>
-              <a href="/api/tests/${a.testId}/run?token=${App.token}&retake=1" target="_blank" class="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-[11px] rounded transition">
+              <a href="/api/tests/${a.testId}/run?token=${App.token}&retake=1&tz=${new Date().getTimezoneOffset()}" target="_blank" class="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-[11px] rounded transition">
                 <i class="fa-solid fa-rotate-right"></i>
                 <span>Retake</span>
               </a>

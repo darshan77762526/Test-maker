@@ -235,8 +235,20 @@ router.post('/upload', upload.single('testFile'), async (req, res) => {
     const title = req.body.title?.trim() || parsed.title;
     const durationMinutes = parseInt(req.body.durationMinutes, 10) || parsed.durationMinutes;
     const hideResults = req.body.hideResultsStudent === '1' || req.body.hideResultsStudent === true ? 1 : 0;
-    const windowStart = req.body.windowStart ? req.body.windowStart.trim() : null;
-    const windowEnd = req.body.windowEnd ? req.body.windowEnd.trim() : null;
+
+    function normalizeWindowDate(val) {
+      if (!val) return null;
+      val = String(val).trim();
+      if (!val) return null;
+      if (val.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(val)) return val;
+      const istDate = new Date(val.replace(' ', 'T') + '+05:30');
+      if (!isNaN(istDate.getTime())) return istDate.toISOString();
+      const d = new Date(val);
+      return !isNaN(d.getTime()) ? d.toISOString() : val;
+    }
+
+    const windowStart = normalizeWindowDate(req.body.windowStart);
+    const windowEnd = normalizeWindowDate(req.body.windowEnd);
 
     // Generate unique test code
     let testCode = req.body.testCode?.trim();
@@ -443,13 +455,26 @@ router.patch('/tests/:id', async (req, res) => {
       updates.push('duration_minutes = ?');
       params.push(parseInt(durationMinutes, 10));
     }
+    function normalizeWindowDate(val) {
+      if (!val) return null;
+      val = String(val).trim();
+      if (!val) return null;
+      if (val.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(val)) return val;
+      const istDate = new Date(val.replace(' ', 'T') + '+05:30');
+      if (!isNaN(istDate.getTime())) return istDate.toISOString();
+      const d = new Date(val);
+      return !isNaN(d.getTime()) ? d.toISOString() : val;
+    }
+
     if (windowStart !== undefined) {
+      const normStart = normalizeWindowDate(windowStart);
       updates.push('window_start = ?');
-      params.push(windowStart ? windowStart.trim() : null);
+      params.push(normStart);
     }
     if (windowEnd !== undefined) {
+      const normEnd = normalizeWindowDate(windowEnd);
       updates.push('window_end = ?');
-      params.push(windowEnd ? windowEnd.trim() : null);
+      params.push(normEnd);
     }
 
     if (updates.length === 0) {
@@ -468,8 +493,8 @@ router.patch('/tests/:id', async (req, res) => {
           if (isActive !== undefined) fbUpdate['is_active'] = isActive ? 1 : 0;
           if (title) fbUpdate['title'] = title.trim();
           if (durationMinutes) fbUpdate['duration_minutes'] = parseInt(durationMinutes, 10);
-          if (windowStart !== undefined) fbUpdate['window_start'] = windowStart ? windowStart.trim() : null;
-          if (windowEnd !== undefined) fbUpdate['window_end'] = windowEnd ? windowEnd.trim() : null;
+          if (windowStart !== undefined) fbUpdate['window_start'] = normalizeWindowDate(windowStart);
+          if (windowEnd !== undefined) fbUpdate['window_end'] = normalizeWindowDate(windowEnd);
           await rtdb.ref(`cbt/tests/${testId}`).update(fbUpdate);
         }
       } catch (e) {}

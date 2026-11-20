@@ -12,13 +12,43 @@ if (!fs.existsSync(uploadDir)) {
   try { fs.mkdirSync(uploadDir, { recursive: true }); } catch (e) {}
 }
 
+function parseWindowDate(dateStr, clientOffsetMinutes) {
+  if (!dateStr) return null;
+  dateStr = String(dateStr).trim();
+  if (!dateStr) return null;
+
+  // If already standard ISO with Z or explicit offset (+HH:MM / -HH:MM)
+  if (dateStr.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(dateStr)) {
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // If naive datetime e.g. "2026-11-20T10:05" or "2026-11-20 10:05"
+  const normalized = dateStr.replace(' ', 'T');
+  if (clientOffsetMinutes !== undefined && clientOffsetMinutes !== null && !isNaN(clientOffsetMinutes)) {
+    const utcBase = new Date(normalized + 'Z');
+    if (!isNaN(utcBase.getTime())) {
+      return new Date(utcBase.getTime() + Number(clientOffsetMinutes) * 60000);
+    }
+  }
+
+  // Standard fallback for India Standard Time (UTC+05:30)
+  const istDate = new Date(normalized + '+05:30');
+  if (!isNaN(istDate.getTime())) return istDate;
+
+  const directDate = new Date(normalized);
+  return isNaN(directDate.getTime()) ? null : directDate;
+}
+
 function renderWindowNotice(status, title, targetDate) {
   const isUpcoming = status === 'UPCOMING';
   const heading = isUpcoming ? 'Examination Window Not Open Yet' : 'Examination Window Has Closed';
   const badge = isUpcoming ? 'UPCOMING EXAM' : 'WINDOW EXPIRED';
+  const parsedTarget = parseWindowDate(targetDate) || new Date(targetDate);
+  const formattedDate = !isNaN(parsedTarget.getTime()) ? parsedTarget.toLocaleString() : targetDate;
   const message = isUpcoming 
-    ? `This examination is scheduled to unlock on <strong>${new Date(targetDate).toLocaleString()}</strong>. Candidate entry is strictly restricted prior to the scheduled window.`
-    : `The examination window for this paper concluded on <strong>${new Date(targetDate).toLocaleString()}</strong>. Late submissions or re-entries are locked as per examination regulations.`;
+    ? `This examination is scheduled to unlock on <strong>${formattedDate}</strong>. Candidate entry is strictly restricted prior to the scheduled window.`
+    : `The examination window for this paper concluded on <strong>${formattedDate}</strong>. Late submissions or re-entries are locked as per examination regulations.`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -169,6 +199,7 @@ router.get('/', authenticate, async (req, res) => {
       }
     }
 
+    const clientTz = req.headers['x-timezone-offset'] || req.query.tz;
     const now = new Date();
 
     const formatted = tests.map(t => {
@@ -179,11 +210,14 @@ router.get('/', authenticate, async (req, res) => {
         subjectsList = [t.subjects];
       }
 
-      // Compute scheduling window status
+      // Compute scheduling window status with timezone awareness
+      const startDate = parseWindowDate(t.window_start, clientTz);
+      const endDate = parseWindowDate(t.window_end, clientTz);
+
       let windowStatus = 'ACTIVE';
-      if (t.window_start && new Date(t.window_start) > now) {
+      if (startDate && startDate > now) {
         windowStatus = 'UPCOMING';
-      } else if (t.window_end && new Date(t.window_end) < now) {
+      } else if (endDate && endDate < now) {
         windowStatus = 'EXPIRED';
       }
 
@@ -234,12 +268,15 @@ router.get('/:id/run', authenticate, async (req, res) => {
     // Window Scheduling Enforcement (Feature 3)
     // Only check window for active attempts; rewatch mode is always accessible
     const isRetake = req.query.retake === '1' || req.query.retake === 'true';
+    const clientTz = req.query.tz || req.headers['x-timezone-offset'];
     const now = new Date();
+    const startDate = parseWindowDate(test.window_start, clientTz);
+    const endDate = parseWindowDate(test.window_end, clientTz);
 
-    if (test.window_start && new Date(test.window_start) > now) {
+    if (startDate && startDate > now) {
       return res.status(403).send(renderWindowNotice('UPCOMING', test.title, test.window_start));
     }
-    if (test.window_end && new Date(test.window_end) < now && isRetake) {
+    if (endDate && endDate < now && isRetake) {
       return res.status(403).send(renderWindowNotice('EXPIRED', test.title, test.window_end));
     }
 

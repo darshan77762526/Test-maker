@@ -115,11 +115,17 @@ window.AdminModule = {
         const hideResultsRadio = document.querySelector('input[name="hideResults"]:checked');
         formData.append('hideResultsStudent', hideResultsRadio ? hideResultsRadio.value : '0');
 
-        // Window Scheduling (Feature 3)
+        // Window Scheduling (Feature 3) - Normalize datetime-local to ISO UTC
+        const toIsoUtc = (val) => {
+          if (!val) return null;
+          const d = new Date(val);
+          return isNaN(d.getTime()) ? val : d.toISOString();
+        };
+
         const wStart = document.getElementById('upload-window-start')?.value;
         const wEnd = document.getElementById('upload-window-end')?.value;
-        if (wStart) formData.append('windowStart', wStart);
-        if (wEnd) formData.append('windowEnd', wEnd);
+        if (wStart) formData.append('windowStart', toIsoUtc(wStart));
+        if (wEnd) formData.append('windowEnd', toIsoUtc(wEnd));
 
         try {
           const res = await fetch('/api/admin/upload', {
@@ -506,7 +512,7 @@ window.AdminModule = {
             <td class="py-3 px-4 text-center font-bold text-slate-700">${t.totalAttempts}</td>
             <td class="py-3 px-4 text-center">${policyBadge}</td>
             <td class="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
-              <a href="/api/tests/${t.id}/run?token=${App.token}" target="_blank" class="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 font-bold text-[11px] rounded transition">
+              <a href="/api/tests/${t.id}/run?token=${App.token}&tz=${new Date().getTimezoneOffset()}" target="_blank" class="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 font-bold text-[11px] rounded transition">
                 Preview
               </a>
               <button onclick="AdminModule.deleteTest(${t.id})" class="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-[11px] rounded transition">

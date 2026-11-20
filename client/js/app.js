@@ -44,6 +44,7 @@ window.App = {
     if (this.token) {
       headers['Authorization'] = 'Bearer ' + this.token;
     }
+    headers['x-timezone-offset'] = new Date().getTimezoneOffset().toString();
     options.headers = headers;
 
     const res = await fetch(url, options);

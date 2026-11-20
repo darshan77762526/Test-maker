@@ -143,8 +143,20 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
   /* Ultra-smooth Proceed button overrides */
   #btn-start-exam {
     cursor: pointer !important;
-    transition: all 0.15s ease !important;
-    touch-action: manipulation;
+    transition: transform 0.1s ease, background-color 0.15s ease !important;
+    touch-action: manipulation !important;
+    -webkit-tap-highlight-color: transparent !important;
+    background-color: #0284c7 !important;
+    color: #ffffff !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+  #btn-start-exam:hover {
+    background-color: #0369a1 !important;
+  }
+  #btn-start-exam:active {
+    transform: scale(0.97) !important;
+    background-color: #075985 !important;
   }
   #cbt-proctor-container {
     display: none;
@@ -448,13 +460,17 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
     handleExamSubmission();
   };
 
-  // 4. Instructions Checkbox & Start Button Controller (Instant, Smooth & Bug-Proof)
+  // 4. Instructions Checkbox & Start Button Controller (Instant, Smooth & Zero-Latency)
+  let hasExamLaunched = false;
+  let keepEnabledInterval = null;
+
   function initExamControls() {
     const chk = document.getElementById('chk-declare');
     const startBtn = document.getElementById('btn-start-exam');
     if (!startBtn) return;
 
     function ensureEnabled() {
+      if (hasExamLaunched) return;
       startBtn.removeAttribute('disabled');
       startBtn.disabled = false;
       startBtn.classList.remove('disabled:bg-slate-300', 'disabled:cursor-not-allowed');
@@ -466,37 +482,48 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
       startBtn.style.opacity = '1';
     }
 
-    function launchExam() {
-      if (chk) chk.checked = true;
-      ensureEnabled();
-      initProctoring(); // Initialize camera snapshot engine
-
-      if (typeof window.clearSavedProgress === 'function') window.clearSavedProgress();
-
-      if (typeof window.beginFreshExam === 'function') {
-        try { window.beginFreshExam(); } catch (e) {}
-      } else if (typeof window.showScreen === 'function') {
-        try {
-          window.showScreen('exam');
-          if (typeof window.visitQuestion === 'function') window.visitQuestion(0);
-          if (typeof window.startTimer === 'function') window.startTimer();
-        } catch (e) {}
+    function launchExam(e) {
+      if (e) {
+        try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
       }
+      if (hasExamLaunched) return;
+      hasExamLaunched = true;
+      if (keepEnabledInterval) clearInterval(keepEnabledInterval);
 
-      // Guarantee immediate DOM transition across all devices and browsers
+      if (chk) chk.checked = true;
+
+      // Instant DOM screen transition without any lag
       const vInst = document.getElementById('view-instructions');
       const vExam = document.getElementById('view-exam');
       const vRes = document.getElementById('view-results');
       if (vInst) vInst.classList.add('hidden');
       if (vExam) vExam.classList.remove('hidden');
       if (vRes) vRes.classList.add('hidden');
-      if (typeof window.visitQuestion === 'function') {
-        try { window.visitQuestion(0); } catch (e) {}
-      }
-      if (typeof window.startTimer === 'function') {
-        try { window.startTimer(); } catch (e) {}
-      }
       window.scrollTo({ top: 0, behavior: 'instant' });
+
+      // Cleanly start fresh exam state
+      if (typeof window.clearSavedProgress === 'function') {
+        try { window.clearSavedProgress(); } catch (err) {}
+      }
+
+      if (typeof window.beginFreshExam === 'function') {
+        try { window.beginFreshExam(); } catch (err) {}
+      } else {
+        if (typeof window.showScreen === 'function') {
+          try { window.showScreen('exam'); } catch (err) {}
+        }
+        if (typeof window.visitQuestion === 'function') {
+          try { window.visitQuestion(0); } catch (err) {}
+        }
+        if (typeof window.startTimer === 'function') {
+          try { window.startTimer(); } catch (err) {}
+        }
+      }
+
+      // Non-blocking background proctoring warm-up
+      setTimeout(() => {
+        initProctoring();
+      }, 400);
     }
 
     if (chk) {
@@ -505,16 +532,13 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
       chk.addEventListener('click', ensureEnabled);
     }
 
-    // Direct click or touch on Proceed to Exam button auto-checks and starts immediately
-    startBtn.onclick = function(e) {
-      launchExam();
-    };
-    startBtn.addEventListener('click', () => {
-      launchExam();
-    });
-    startBtn.addEventListener('touchend', () => {
-      launchExam();
-    });
+    // High responsiveness: immediate pointerdown for touch/stylus + click fallback
+    startBtn.onclick = launchExam;
+    startBtn.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        launchExam(e);
+      }
+    }, { passive: false });
 
     ensureEnabled();
   }
@@ -530,7 +554,11 @@ function createBridgeScript(testId, userToken, userName, pastSubmission = null) 
   setTimeout(initExamControls, 1000);
 
   // Keep button enabled continuously against any external override
-  const keepEnabledInterval = setInterval(() => {
+  keepEnabledInterval = setInterval(() => {
+    if (hasExamLaunched) {
+      if (keepEnabledInterval) clearInterval(keepEnabledInterval);
+      return;
+    }
     const startBtn = document.getElementById('btn-start-exam');
     if (startBtn) {
       if (startBtn.disabled || startBtn.style.pointerEvents === 'none') {
